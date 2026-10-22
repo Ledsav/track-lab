@@ -79,3 +79,6 @@ footer a:hover { color:var(--fg); }
   .dot { animation:none; }
   .card, .wash, .frame { transition:none; }
 }
+
+/* brand mark, top-left of the hero (the readout sits top-right) */
+.hero-mark { position:absolute; z-index:1; top:calc(24px + env(safe-area-inset-top,0px)); left:var(--gutter); width:40px; height:40px; }

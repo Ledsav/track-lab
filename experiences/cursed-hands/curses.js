@@ -29,8 +29,8 @@ const BEST_KEY = 'track-lab:cursed-hands:best';
 /** size = radius at z = 0, as a share of min(W, H). speed = depth per second. */
 export const CURSES = {
   fly:    { kanji:'蠅頭',   en:'Fly Head',       hp:1,  score:50,   size:.075, speed:.17, wander:1,   swarm:2, draw:drawFly },
-  eyes:   { kanji:'目玉',   en:'Eye Cluster',    hp:3,  score:120,  size:.13,  speed:.11, wander:.45, draw:drawEyes },
-  mouth:  { kanji:'大口',   en:'Grinning Mouth', hp:5,  score:180,  size:.14,  speed:.09, wander:.3,  draw:drawMouth },
+  arms:   { kanji:'腕塊',   en:'Arm Knot',       hp:3,  score:120,  size:.13,  speed:.11, wander:.45, draw:drawArms },
+  split:  { kanji:'裂口',   en:'Split Face',     hp:5,  score:180,  size:.15,  speed:.09, wander:.3,  draw:drawSplit },
   bearer: { kanji:'指持ち', en:'Finger Bearer',  hp:26, score:1500, size:.23,  speed:.04, wander:.15, boss:true, damage:2, draw:drawBearer },
 };
 
@@ -66,7 +66,7 @@ export class CurseWaves {
     const q = [], count = 3 + n*2;
     for (let i = 0; i < count; i++) {
       const r = Math.random();
-      q.push(n >= 3 && r < Math.min(.35, .12 + n*.03) ? 'mouth' : n >= 2 && r < .55 ? 'eyes' : 'fly');
+      q.push(n >= 3 && r < Math.min(.35, .12 + n*.03) ? 'split' : n >= 2 && r < .55 ? 'arms' : 'fly');
     }
     if (n % 5 === 0) q.splice(2, 0, 'bearer');
     return q;
@@ -220,18 +220,15 @@ export class CurseWaves {
       else if (c.stun > 0) ctx.translate(rand(-1, 1)*c.R*.03, rand(-1, 1)*c.R*.03);
       aura(ctx, c.R, this.t + c.ph, c.seed);
       const look = { x:clamp((focus.x - c.x)/(c.R*6), -1, 1), y:clamp((focus.y - c.y)/(c.R*6), -1, 1) };
+      if (c.flash > 0 && 'filter' in ctx) ctx.filter = `brightness(${1 + 2.5*c.flash}) saturate(${1 - .8*c.flash})`;   // hit: the silhouette flashes white
       c.T.draw(ctx, c.R, this.t + c.ph, look, c);
-      if (c.flash > 0) {
-        ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = c.flash*.65; ctx.fillStyle = '#fff';
-        ctx.beginPath(); ctx.arc(0, 0, c.R*.9, 0, TAU); ctx.fill();
-      }
       ctx.restore();
       if (c.dying) continue;
       if (this.voidOn) voidStatic(ctx, c, this.t);
       if (c.z < .3) {                                                   // about to hit: pulsing warning ring
         const a = (1 - c.z/.3)*(.55 + .45*Math.sin(this.t*22));
         ctx.save(); ctx.strokeStyle = `rgba(255,40,60,${a})`; ctx.lineWidth = Math.max(2, c.R*.05);
-        ctx.beginPath(); ctx.arc(c.x, c.y, c.R*1.35, 0, TAU); ctx.stroke(); ctx.restore();
+        ctx.setLineDash([c.R*.12, c.R*.08]); ctx.beginPath(); ctx.arc(c.x, c.y, c.R*1.45, this.t*2, this.t*2 + TAU); ctx.stroke(); ctx.restore();
       }
       if (c.T.boss) {
         const w = c.R*1.6, y = c.y + c.R*1.35;
@@ -259,242 +256,280 @@ export class CurseWaves {
 }
 
 /* =============================================================================
-   CURSE DESIGNS
-   All drawn around (0, 0) with radius R: thick ink outline, flat cel fills, one
-   shadow tone, flickering cursed-energy smoke. `look` (−1..1) aims the pupils at your hand.
+   CURSE DESIGNS: body horror
+   Drawn around (0, 0) in units of R. Asymmetric silhouettes, limbs built from
+   tapered bones, too many eyes and mouths. Ink outlines "boil" (re-jittered 8×/s,
+   like hand-redrawn animation frames), one cel shadow with manga hatching.
+   `look` (−1..1) aims the pupils at your hand.
    ============================================================================= */
-const INK = '#0c0a0b';
-const lw = R => Math.max(1.5, R*.055);
+const INK = '#0b0809';
+const SKIN = { pale:'#c4b8a6', mid:'#a29282', shade:'#5c4c47', dark:'#2b2027', deep:'#140c11', bone:'#cdbb9c', boneShade:'#7d6a58' };
 const rrect = (ctx, x, y, w, h, r) => ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h);
+const add = (p, a, len) => [p[0] + Math.cos(a)*len, p[1] + Math.sin(a)*len];
+
+/** Smooth path through points (quadratic through midpoints). */
+function smooth(ctx, pts, closed = true) {
+  const n = pts.length, mid = (a, b) => [(a[0] + b[0])/2, (a[1] + b[1])/2];
+  ctx.beginPath();
+  if (closed) {
+    const s = mid(pts[n - 1], pts[0]); ctx.moveTo(s[0], s[1]);
+    for (let i = 0; i < n; i++) { const q = mid(pts[i], pts[(i + 1) % n]); ctx.quadraticCurveTo(pts[i][0], pts[i][1], q[0], q[1]); }
+    ctx.closePath();
+  } else {
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < n - 1; i++) { const q = mid(pts[i], pts[i + 1]); ctx.quadraticCurveTo(pts[i][0], pts[i][1], q[0], q[1]); }
+    ctx.lineTo(pts[n - 1][0], pts[n - 1][1]);
+  }
+}
+/** Hand-drawn boil: outline points jitter a little, re-seeded 8×/s. */
+function boil(pts, amt, t, seed) {
+  const r = mulberry(seed*31 + Math.floor(t*8));
+  return pts.map(([x, y]) => [x + (r() - .5)*amt, y + (r() - .5)*amt]);
+}
+/** Outline of a tapered limb along a centre line; widths per point, rounded tip. */
+function taper(pts, w) {
+  const n = pts.length, L = [], Rt = [];
+  for (let i = 0; i < n; i++) {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1;
+    const nx = -dy/l*w[i]/2, ny = dx/l*w[i]/2;
+    L.push([pts[i][0] + nx, pts[i][1] + ny]); Rt.push([pts[i][0] - nx, pts[i][1] - ny]);
+  }
+  const e = pts[n - 1], d = pts[n - 2], dl = Math.hypot(e[0] - d[0], e[1] - d[1]) || 1;
+  return [...L, [e[0] + (e[0] - d[0])/dl*w[n - 1]*.55, e[1] + (e[1] - d[1])/dl*w[n - 1]*.55], ...Rt.reverse()];
+}
+/** Lumpy organic outline: seeded radius profile, stretched, with an optional bulge. */
+function lump(seed, R, { sx = 1, sy = 1, cx = 0, cy = 0, n = 20, bulge = null, t = 0 } = {}) {
+  const r = mulberry(seed), prof = Array.from({ length:n }, () => .84 + r()*.3);
+  return prof.map((v, i) => {
+    const a = i/n*TAU; let rad = v*(1 + .025*Math.sin(t*2.5 + i*1.7));
+    if (bulge) rad *= 1 + bulge[1]*Math.max(0, Math.cos(a - bulge[0]))**2;
+    return [cx*R + Math.cos(a)*rad*R*sx, cy*R + Math.sin(a)*rad*R*sy];
+  });
+}
+/** Fill + cel shadow (+ hatching) + heavy boiling ink line with a rough second pass. */
+function inked(ctx, pts, R, t, seed, { fill, shade, hatch = 0, lw = .045, rough = true } = {}) {
+  const p = boil(pts, R*.018, t, seed);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of p) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  const w = x1 - x0, h = y1 - y0;
+  ctx.save();
+  smooth(ctx, p); ctx.fillStyle = fill; ctx.fill();
+  if (shade) {
+    ctx.save(); ctx.clip();
+    ctx.fillStyle = shade; ctx.beginPath(); ctx.ellipse(x0 + w*.82, y0 + h*.86, w*.78, h*.68, -.3, 0, TAU); ctx.fill();
+    if (hatch) {
+      ctx.strokeStyle = 'rgba(11,8,9,.42)'; ctx.lineWidth = Math.max(.7, R*.012); ctx.lineCap = 'round';
+      const r = mulberry(seed + 99);
+      for (let i = 0; i < hatch; i++) {
+        const hx = x0 + w*(.5 + r()*.45), hy = y0 + h*(.5 + r()*.42), l = Math.min(w, h)*(.08 + r()*.08);
+        ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx - l*.7, hy + l); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+  ctx.strokeStyle = INK; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.lineWidth = Math.max(1.3, R*lw);
+  smooth(ctx, p); ctx.stroke();
+  if (rough) { ctx.globalAlpha *= .55; ctx.lineWidth = Math.max(.7, R*lw*.35); smooth(ctx, boil(pts, R*.035, t, seed + 5)); ctx.stroke(); }
+  ctx.restore();
+}
+/** Jointed chain from a base point: segs = [[turn, length], …]. */
+function chain(base, ang, segs) {
+  const pts = [base]; let p = base;
+  for (const [da, len] of segs) { ang += da; p = add(p, ang, len); pts.push(p); }
+  return pts;
+}
+/** Long-fingered hand. curl 0 = spread, 1 = clawing. side flips which way the fingers curl. */
+function hand(ctx, at, ang, s, curl, t, seed, { fill = SKIN.mid, shade = SKIN.shade, side = 1, nails = true } = {}) {
+  const spread = [-.55, -.2, .15, .48];
+  spread.forEach((sp, i) => {
+    const base = add(at, ang + sp, s*.22), bend = side*curl*.75;
+    const pts = chain(base, ang + sp*1.3, [[0, s*.42*(i === 1 || i === 2 ? 1.1 : .9)], [bend, s*.3], [bend, s*.22]]);
+    inked(ctx, taper(pts, [s*.17, s*.145, s*.12, s*.08]), s, t, seed + i, { fill, shade, lw:.045 });
+    if (nails) { const tip = pts[3]; ctx.fillStyle = '#5e4642'; ctx.beginPath(); ctx.arc(tip[0], tip[1], s*.045, 0, TAU); ctx.fill(); }
+  });
+  const thumb = chain(add(at, ang - side*1.3, s*.14), ang - side*1.0, [[0, s*.3], [side*curl*.6, s*.22]]);
+  inked(ctx, taper(thumb, [s*.18, s*.14, s*.09]), s, t, seed + 9, { fill, shade, lw:.045 });
+  inked(ctx, lump(seed + 3, s*.32, { cx:at[0]/(s*.32), cy:at[1]/(s*.32), n:9, t }), s, t, seed + 4, { fill, shade, lw:.045 });
+}
+/** Two-bone arm (shoulder → elbow → wrist) ending in a hand. */
+function arm(ctx, sh, el, wr, w, R, t, seed, o = {}) {
+  inked(ctx, taper([sh, el, wr], [w, w*.72, w*.5]), R, t, seed, { fill:o.fill || SKIN.mid, shade:o.shade || SKIN.shade, hatch:3 });
+  const a = Math.atan2(wr[1] - el[1], wr[0] - el[0]);
+  hand(ctx, wr, a, o.hand || R*.4, o.curl ?? .4, t, seed + 20, { fill:o.fill || SKIN.mid, shade:o.shade || SKIN.shade, side:o.side || 1 });
+}
+/** Sunken, bloodshot eye. iris colour, blink 0..1, slit pupil option. */
+function eye(ctx, x, y, r, look, iris, blink = 0, { slit = false, seed = 1, glow = false } = {}) {
+  ctx.save(); ctx.translate(x, y);
+  ctx.fillStyle = 'rgba(30,12,18,.55)'; ctx.beginPath(); ctx.ellipse(0, r*.08, r*1.28, r*1.05, 0, 0, TAU); ctx.fill();   // socket
+  ctx.scale(1, Math.max(.05, 1 - blink));
+  ctx.fillStyle = '#e4d8b8'; ctx.beginPath(); ctx.ellipse(0, 0, r, r*.8, 0, 0, TAU); ctx.fill();
+  ctx.save(); ctx.clip();
+  const rnd = mulberry(seed);
+  ctx.strokeStyle = 'rgba(170,20,30,.65)'; ctx.lineWidth = Math.max(.6, r*.05);   // veins creeping in from the rim
+  for (let i = 0; i < 7; i++) {
+    const a = rnd()*TAU; let px = Math.cos(a)*r, py = Math.sin(a)*r*.8;
+    ctx.beginPath(); ctx.moveTo(px, py);
+    for (let k = 0; k < 3; k++) { px *= .78; py *= .78; px += (rnd() - .5)*r*.25; py += (rnd() - .5)*r*.25; ctx.lineTo(px, py); }
+    ctx.stroke();
+  }
+  const px = look.x*r*.38, py = look.y*r*.28;
+  if (glow) { ctx.fillStyle = iris; ctx.shadowColor = iris; ctx.shadowBlur = r*.8; }
+  ctx.fillStyle = iris; ctx.beginPath(); ctx.arc(px, py, r*.42, 0, TAU); ctx.fill(); ctx.shadowBlur = 0;
+  ctx.fillStyle = '#000'; ctx.beginPath();
+  if (slit) ctx.ellipse(px, py, r*.08, r*.36, 0, 0, TAU); else ctx.arc(px, py, r*.16, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.beginPath(); ctx.arc(px - r*.14, py - r*.15, r*.07, 0, TAU); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = INK; ctx.lineWidth = Math.max(1, r*.13); ctx.beginPath(); ctx.ellipse(0, 0, r, r*.8, 0, 0, TAU); ctx.stroke();
+  ctx.restore();
+}
+const blinkAt = (t, ph) => Math.pow(Math.max(0, Math.sin(t*.7 + ph*5)), 40);
+/** A gash of a mouth: lens between two smooth lips, dark inside, teeth on both edges. */
+function gash(ctx, c0, c1, open, R, t, seed, { inside = '#3a0610', nTeeth = 7, toothH = .12, glow = null } = {}) {
+  const mx = (c0[0] + c1[0])/2, my = (c0[1] + c1[1])/2, dx = c1[0] - c0[0], dy = c1[1] - c0[1], l = Math.hypot(dx, dy) || 1;
+  const nx = -dy/l, ny = dx/l, o = open*R;
+  const top = [c0, [mx - nx*o, my - ny*o], c1], bot = [c1, [mx + nx*o, my + ny*o], c0];
+  const path = () => { ctx.beginPath(); ctx.moveTo(c0[0], c0[1]); ctx.quadraticCurveTo(top[1][0], top[1][1], c1[0], c1[1]); ctx.quadraticCurveTo(bot[1][0], bot[1][1], c0[0], c0[1]); ctx.closePath(); };
+  ctx.save();
+  path(); ctx.fillStyle = inside; ctx.fill();
+  ctx.save(); ctx.clip();
+  if (glow) { const g = ctx.createRadialGradient(mx, my, 0, mx, my, l*.5); g.addColorStop(0, glow); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(mx - l, my - l, l*2, l*2); }
+  const q = (p0, p1, p2, k) => [(1 - k)**2*p0[0] + 2*(1 - k)*k*p1[0] + k*k*p2[0], (1 - k)**2*p0[1] + 2*(1 - k)*k*p1[1] + k*k*p2[1]];
+  const r = mulberry(seed);
+  ctx.fillStyle = '#e2d8be'; ctx.strokeStyle = INK; ctx.lineWidth = Math.max(.7, R*.012);
+  for (const [edge, sgn] of [[top, 1], [bot, -1]]) {
+    for (let i = 0; i < nTeeth; i++) {
+      const k = (i + .5)/nTeeth, p = q(edge[0], edge[1], edge[2], k), len = R*toothH*(.55 + r()*.7)*Math.sin(Math.PI*k), w = l/nTeeth*.85;
+      ctx.save(); ctx.translate(p[0], p[1]); ctx.rotate(Math.atan2(ny*sgn, nx*sgn) - Math.PI/2);
+      ctx.beginPath(); rrect(ctx, -w/2, -len*.2, w, len, w*.4); ctx.fill(); ctx.stroke(); ctx.restore();
+    }
+  }
+  ctx.restore();
+  path(); ctx.strokeStyle = INK; ctx.lineWidth = Math.max(1.2, R*.035); ctx.stroke();
+  ctx.restore();
+}
 
 /** Dark smoke + licking purple-black flames, re-seeded at 10 fps ("on twos"). */
 function aura(ctx, R, t, seed) {
   const rnd = mulberry(Math.floor(t*10)*131 + seed);
   ctx.save();
-  const g = ctx.createRadialGradient(0, 0, R*.4, 0, 0, R*2);
-  g.addColorStop(0, 'rgba(12,0,22,.6)'); g.addColorStop(1, 'rgba(12,0,22,0)');
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R*2, 0, TAU); ctx.fill();
-  for (let i = 0; i < 9; i++) {
-    const a = rnd()*TAU, len = R*(.35 + rnd()*.7), bx = Math.cos(a)*R*.8, by = Math.sin(a)*R*.8;
-    const tx = bx + Math.cos(a)*len*.6 + (rnd() - .5)*R*.3, ty = by + Math.sin(a)*len*.4 - len*.7, side = R*.12;
-    ctx.fillStyle = 'rgba(38,0,58,.6)'; ctx.beginPath();
+  const g = ctx.createRadialGradient(0, 0, R*.3, 0, 0, R*1.9);
+  g.addColorStop(0, 'rgba(12,0,20,.55)'); g.addColorStop(1, 'rgba(12,0,20,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R*1.9, 0, TAU); ctx.fill();
+  for (let i = 0; i < 10; i++) {
+    const a = rnd()*TAU, len = R*(.35 + rnd()*.7), bx = Math.cos(a)*R*.75, by = Math.sin(a)*R*.7;
+    const tx = bx + Math.cos(a)*len*.5 + (rnd() - .5)*R*.3, ty = by + Math.sin(a)*len*.3 - len*.75, side = R*.1;
+    ctx.fillStyle = `rgba(${rnd() < .3 ? '70,10,90' : '30,0,45'},.55)`; ctx.beginPath();
     ctx.moveTo(bx - Math.sin(a)*side, by + Math.cos(a)*side);
     ctx.quadraticCurveTo((bx + tx)/2 + side, (by + ty)/2, tx, ty);
     ctx.quadraticCurveTo((bx + tx)/2 - side, (by + ty)/2, bx + Math.sin(a)*side, by - Math.cos(a)*side);
     ctx.fill();
   }
-  ctx.globalCompositeOperation = 'lighter'; ctx.strokeStyle = 'rgba(150,60,230,.28)'; ctx.lineWidth = Math.max(1, R*.025);
-  ctx.beginPath(); ctx.arc(0, 0, R*1.08, 0, TAU); ctx.stroke();
   ctx.restore();
 }
 
-/** Seeded lumpy outline, cached on the curse. */
-function profile(c, n = 24) {
-  if (!c.prof) { const r = mulberry(c.seed); const raw = Array.from({ length:n }, () => .82 + r()*.36); c.prof = raw.map((v, i) => (raw[(i + n - 1) % n] + v*2 + raw[(i + 1) % n])/4); }
-  return c.prof;
-}
-function blobPath(ctx, R, prof, t, sx = 1, sy = 1) {
-  const n = prof.length; ctx.beginPath();
-  for (let i = 0; i <= n; i++) {
-    const a = i/n*TAU, r = R*prof[i % n]*(1 + .035*Math.sin(t*3 + i*1.3));
-    const x = Math.cos(a)*r*sx, y = Math.sin(a)*r*sy;
-    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-  }
-  ctx.closePath();
-}
-/** One eye: sclera, iris, pupil aimed by look; blink 0 (open) … 1 (shut). */
-function eye(ctx, x, y, r, look, iris, blink = 0, slit = false) {
-  ctx.save(); ctx.translate(x, y); ctx.scale(1, Math.max(.06, 1 - blink));
-  ctx.fillStyle = '#f3ece0'; ctx.strokeStyle = INK; ctx.lineWidth = Math.max(1, r*.14);
-  ctx.beginPath(); ctx.ellipse(0, 0, r, r*.78, 0, 0, TAU); ctx.fill();
-  ctx.save(); ctx.clip();
-  const px = look.x*r*.35, py = look.y*r*.25;
-  ctx.fillStyle = iris; ctx.beginPath(); ctx.arc(px, py, r*.55, 0, TAU); ctx.fill();
-  ctx.fillStyle = '#000'; ctx.beginPath();
-  slit ? ctx.ellipse(px, py, r*.12, r*.48, 0, 0, TAU) : ctx.arc(px, py, r*.26, 0, TAU); ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.beginPath(); ctx.arc(px - r*.18, py - r*.2, r*.11, 0, TAU); ctx.fill();
-  ctx.fillStyle = 'rgba(120,20,30,.25)'; ctx.fillRect(-r, r*.35, r*2, r);                  // shadow on the lower lid
-  ctx.restore();
-  ctx.beginPath(); ctx.ellipse(0, 0, r, r*.78, 0, 0, TAU); ctx.stroke();
-  ctx.restore();
-}
-const blinkAt = (t, ph) => Math.pow(Math.max(0, Math.sin(t*.8 + ph*5)), 40);
-
-/* ---- 蠅頭 Fly Head: the weakest grade, buzzing in swarms ---- */
-function drawFly(ctx, R, t, look) {
-  const flap = Math.sin(t*55)*.55;
-  ctx.save(); ctx.lineWidth = Math.max(1, R*.03);                       // wings, motion-blurred
-  for (const side of [-1, 1]) for (const k of [0, .4]) {
-    ctx.save(); ctx.translate(side*R*.35, -R*.5); ctx.rotate(side*(-.5 + flap + k));
-    ctx.fillStyle = `rgba(205,215,235,${k ? .18 : .32})`; ctx.strokeStyle = `rgba(235,240,255,${k ? .2 : .5})`;
-    ctx.beginPath(); ctx.ellipse(side*R*.55, 0, R*.7, R*.24, 0, 0, TAU); ctx.fill(); ctx.stroke(); ctx.restore();
-  }
-  ctx.restore();
-  ctx.save(); ctx.strokeStyle = INK; ctx.lineWidth = Math.max(1.2, R*.06); ctx.lineCap = 'round';   // dangling legs
-  for (const side of [-1, 1]) for (let i = 0; i < 3; i++) {
-    const sw = Math.sin(t*9 + i*2)*R*.06;
-    ctx.beginPath(); ctx.moveTo(side*R*.35, R*.45 + i*R*.08);
-    ctx.lineTo(side*R*(.65 + i*.12), R*(.7 + i*.1) + sw); ctx.lineTo(side*R*(.6 + i*.12), R*(1 + i*.1) + sw); ctx.stroke();
-  }
-  ctx.restore();
-  // head
-  const g = ctx.createRadialGradient(-R*.25, -R*.3, R*.1, 0, 0, R);
-  g.addColorStop(0, '#8e9a6c'); g.addColorStop(.6, '#5a6544'); g.addColorStop(1, '#2c3322');
-  ctx.fillStyle = g; ctx.strokeStyle = INK; ctx.lineWidth = lw(R);
-  ctx.beginPath(); ctx.ellipse(0, 0, R*.82, R*.72, 0, 0, TAU); ctx.fill(); ctx.stroke();
-  // huge compound eyes
-  for (const side of [-1, 1]) {
-    const ex = side*R*.4, ey = -R*.12;
-    const eg = ctx.createRadialGradient(ex - side*R*.1, ey - R*.12, R*.03, ex, ey, R*.42);
-    eg.addColorStop(0, '#ff6b5e'); eg.addColorStop(.55, '#b3121f'); eg.addColorStop(1, '#4a0309');
-    ctx.fillStyle = eg; ctx.beginPath(); ctx.ellipse(ex, ey, R*.36, R*.42, side*.25, 0, TAU); ctx.fill();
-    ctx.save(); ctx.clip(); ctx.fillStyle = 'rgba(0,0,0,.35)';         // facets
-    for (let fx = -3; fx <= 3; fx++) for (let fy = -3; fy <= 3; fy++) { ctx.beginPath(); ctx.arc(ex + fx*R*.1 + (fy % 2)*R*.05, ey + fy*R*.1, R*.018, 0, TAU); ctx.fill(); }
-    ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.beginPath(); ctx.arc(ex + look.x*R*.12, ey + look.y*R*.1, R*.12, 0, TAU); ctx.fill();
+/* ---- 蠅頭 Fly Head: a bloated human-ish head on insect legs, one huge bloodshot eye, torn wings ---- */
+function drawFly(ctx, R, t, look, c) {
+  const s = c.seed, flap = Math.sin(t*46 + c.ph)*.5;
+  for (const side of [-1, 1]) {                                          // torn, veined wings
+    ctx.save(); ctx.translate(side*R*.2, -R*.5); ctx.rotate(side*(-.4 + flap*.7));
+    const wing = [[0, 0], [side*.45, -.38], [side*.95, -.36], [side*1.12, -.12], [side*.9, -.02], [side*1.02, .14], [side*.62, .18], [side*.5, .06], [side*.3, .14]].map(([x, y]) => [x*R, y*R]);
+    smooth(ctx, wing); ctx.fillStyle = 'rgba(196,204,186,.3)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(11,8,9,.75)'; ctx.lineWidth = Math.max(.8, R*.02); ctx.stroke();
+    ctx.beginPath(); for (const k of [2, 3, 5]) { ctx.moveTo(0, 0); ctx.lineTo(wing[k][0]*.85, wing[k][1]*.85); } ctx.stroke();
     ctx.restore();
-    ctx.strokeStyle = INK; ctx.lineWidth = lw(R)*.8; ctx.beginPath(); ctx.ellipse(ex, ey, R*.36, R*.42, side*.25, 0, TAU); ctx.stroke();
-    ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.beginPath(); ctx.ellipse(ex - side*R*.12, ey - R*.2, R*.07, R*.04, -.5, 0, TAU); ctx.fill();
   }
-  // mandibles
-  const m = Math.sin(t*12)*.15;
-  ctx.strokeStyle = INK; ctx.lineWidth = lw(R); ctx.lineCap = 'round';
-  for (const side of [-1, 1]) { ctx.beginPath(); ctx.moveTo(side*R*.12, R*.45); ctx.quadraticCurveTo(side*R*(.28 + m), R*.7, side*R*.05, R*.82); ctx.stroke(); }
-  // bristles
-  ctx.lineWidth = Math.max(1, R*.025);
-  for (let i = -3; i <= 3; i++) { ctx.beginPath(); ctx.moveTo(i*R*.1, -R*.68); ctx.lineTo(i*R*.14, -R*.9 - Math.abs(i)*R*.02); ctx.stroke(); }
+  for (const side of [-1, 1]) for (let i = 0; i < 3; i++) {             // jointed insect legs ending in little fingers
+    const tw = Math.sin(t*11 + i*2.1 + side)*R*.05;
+    const hip = [side*R*.28, R*(.25 + i*.1)], knee = [side*R*(.78 + i*.06), R*(-.08 + i*.2) + tw], foot = [side*R*(.92 + i*.08), R*(.8 + i*.12)];
+    inked(ctx, taper([hip, knee, foot], [R*.1, R*.07, R*.035]), R, t, s + i*7 + (side > 0 ? 3 : 0), { fill:SKIN.dark, lw:.035, rough:false });
+  }
+  const head = lump(s, R*.72, { sx:1.05, sy:.92, bulge:[3.6, .25], t });
+  inked(ctx, head, R, t, s, { fill:'#aaa58c', shade:'#5d5947', hatch:5 });
+  eye(ctx, -R*.17, -R*.1, R*.36, look, '#b39d22', blinkAt(t, c.ph), { seed:s + 1 });
+  eye(ctx, R*.4, -R*.34, R*.1, look, '#b39d22', blinkAt(t, c.ph + 2), { seed:s + 2 });
+  gash(ctx, [-R*.38, R*.34], [R*.42, R*.24], .05 + .05*Math.abs(Math.sin(t*3)), R, t, s + 3, { nTeeth:6, toothH:.07 });
 }
 
-/* ---- 目玉 Eye Cluster: a bloated lump of flesh covered in mismatched staring eyes ---- */
-function drawEyes(ctx, R, t, look, c) {
-  const prof = profile(c);
-  blobPath(ctx, R, prof, t, 1, .92);
-  const g = ctx.createRadialGradient(-R*.3, -R*.35, R*.1, 0, 0, R*1.05);
-  g.addColorStop(0, '#eadcca'); g.addColorStop(.55, '#bba08a'); g.addColorStop(1, '#6a4f42');
-  ctx.fillStyle = g; ctx.fill();
-  ctx.save(); ctx.clip();
-  ctx.fillStyle = 'rgba(70,30,40,.28)'; ctx.beginPath(); ctx.ellipse(R*.2, R*.55, R*1.1, R*.55, -.2, 0, TAU); ctx.fill();   // cel shadow
-  const r = mulberry(c.seed + 7);                                       // veins
-  ctx.strokeStyle = 'rgba(150,25,40,.55)'; ctx.lineWidth = Math.max(1, R*.018);
-  for (let i = 0; i < 6; i++) {
-    let x = (r() - .5)*R*1.6, y = (r() - .5)*R*1.6; ctx.beginPath(); ctx.moveTo(x, y);
-    for (let j = 0; j < 4; j++) { x += (r() - .5)*R*.5; y += (r() - .5)*R*.5; ctx.lineTo(x, y); }
-    ctx.stroke();
+/* ---- 腕塊 Arm Knot: a hunched lump of flesh that is mostly human arms, grabbing at you ---- */
+function drawArms(ctx, R, t, look, c) {
+  const s = c.seed;
+  const ARMS = [[-.42, -.12, -2.55, 1], [-.18, -.38, -1.95, 1], [.22, -.36, -1.2, -1], [.48, -.05, -.6, -1], [-.45, .35, 2.6, -1]];
+  ARMS.forEach(([rx, ry, a, side], i) => {
+    const sway = Math.sin(t*1.7 + i*1.9)*.22, sh = [rx*R, ry*R];
+    const el = add(sh, a + sway*.4, R*.55), wr = add(el, a - side*.55 + sway, R*.48);
+    arm(ctx, sh, el, wr, R*.25, R, t, s + i*13, { hand:R*.46, curl:.45 + .45*Math.sin(t*2.4 + i*1.3), side });
+  });
+  const body = lump(s + 1, R*.62, { sx:1.15, sy:.85, cy:.28, bulge:[2.2, .2], t });
+  inked(ctx, body, R, t, s + 1, { fill:SKIN.pale, shade:SKIN.shade, hatch:8 });
+  eye(ctx, -R*.28, R*.08, R*.15, look, '#9fb43a', blinkAt(t, 1), { seed:s + 5 });
+  eye(ctx, R*.03, -R*.02, R*.22, look, '#c9861c', blinkAt(t, 2), { seed:s + 6 });
+  eye(ctx, R*.32, R*.12, R*.11, look, '#9fb43a', blinkAt(t, 3), { seed:s + 7 });
+  eye(ctx, R*.15, R*.33, R*.07, look, '#c9861c', blinkAt(t, 4), { seed:s + 8 });
+  gash(ctx, [-R*.12, R*.3], [-R*.1, R*.62], .05 + .06*(.5 + .5*Math.sin(t*2.2)), R, t, s + 9, { nTeeth:5, toothH:.06 });   // vertical mouth
+}
+
+/* ---- 裂口 Split Face: an emaciated figure on a bent neck; its face is one vertical mouth, eyes sewn shut ---- */
+function drawSplit(ctx, R, t, look, c) {
+  const s = c.seed, sway = Math.sin(t*1.1 + c.ph)*.07;
+  for (const side of [-1, 1]) {                                          // long hanging arms
+    const sh = [side*R*.27, -R*.1], el = [side*R*(.6 + .04*Math.sin(t*1.3 + side)), R*.34], wr = [side*R*.5, R*.8];
+    arm(ctx, sh, el, wr, R*.17, R, t, s + (side > 0 ? 40 : 50), { fill:SKIN.pale, hand:R*.42, curl:.25 + .2*Math.sin(t*1.8 + side), side:-side });
   }
+  const torso = [[-.3, -.2], [-.05, -.26], [.3, -.22], [.25, .18], [.16, .52], [.22, .96], [-.2, 1.0], [-.15, .55], [-.24, .18]].map(([x, y]) => [x*R, y*R]);
+  inked(ctx, torso, R, t, s, { fill:SKIN.pale, shade:SKIN.shade, hatch:4 });
+  ctx.save(); ctx.strokeStyle = 'rgba(11,8,9,.55)'; ctx.lineWidth = Math.max(.8, R*.018); ctx.lineCap = 'round';   // ribs
+  for (let i = 0; i < 4; i++) { const y = R*(-.02 + i*.12); ctx.beginPath(); ctx.moveTo(-R*.2, y); ctx.quadraticCurveTo(0, y + R*.06, R*.19, y - R*.01); ctx.stroke(); }
   ctx.restore();
-  blobPath(ctx, R, prof, t, 1, .92); ctx.strokeStyle = INK; ctx.lineWidth = lw(R); ctx.stroke();
-  if (!c.eyes) {                                                         // scatter eyes without overlaps, biggest first
-    const er = mulberry(c.seed + 3); c.eyes = [{ x:0, y:-R*.05, r:.3, ph:er()*9, iris:'#c9b21a' }];
-    for (let tries = 0; c.eyes.length < 8 && tries < 200; tries++) {
-      const a = er()*TAU, d = er()*.68, e = { x:Math.cos(a)*d*R, y:Math.sin(a)*d*R*.85, r:.1 + er()*.13, ph:er()*9, iris:er() < .5 ? '#8fc23b' : '#d0661c' };
-      if (c.eyes.every(o => Math.hypot(o.x - e.x, o.y - e.y) > (o.r + e.r)*R*1.15)) c.eyes.push(e);
-    }
-    c.eyes.forEach(e => { e.x /= R; e.y /= R; });                      // store in R units so they scale with depth
-  }
-  for (const e of c.eyes) eye(ctx, e.x*R, e.y*R, e.r*R, look, e.iris, blinkAt(t, e.ph));
-  // stitched mouth
-  ctx.strokeStyle = INK; ctx.lineWidth = Math.max(1, R*.035);
-  ctx.beginPath(); ctx.moveTo(-R*.35, R*.62); ctx.quadraticCurveTo(0, R*.72, R*.35, R*.6); ctx.stroke();
-  for (let i = -3; i <= 3; i++) { const x = i*R*.1, y = R*.66 + (1 - (i/3.5)**2)*R*.04; ctx.beginPath(); ctx.moveTo(x - R*.03, y - R*.06); ctx.lineTo(x + R*.03, y + R*.06); ctx.stroke(); }
-}
-
-/* ---- 大口 Grinning Mouth: ink-black body that is mostly a grin of human teeth ---- */
-function drawMouth(ctx, R, t, look, c) {
-  const prof = profile(c);
-  // horns
-  ctx.fillStyle = '#d9cdb5'; ctx.strokeStyle = INK; ctx.lineWidth = lw(R)*.8;
+  const hx = R*(.2 + sway), hy = -R*.8;
+  inked(ctx, taper([[0, -R*.18], [R*.08, -R*.42], [hx - R*.04, hy + R*.24]], [R*.16, R*.12, R*.12]), R, t, s + 2, { fill:SKIN.pale, shade:SKIN.shade });
+  const head = lump(s + 3, R*.4, { sx:.9, sy:1.1, cx:hx/(R*.4), cy:hy/(R*.4), n:16, t });
+  inked(ctx, head, R, t, s + 3, { fill:SKIN.pale, shade:SKIN.shade, hatch:3 });
+  ctx.save(); ctx.strokeStyle = INK; ctx.lineWidth = Math.max(1, R*.022); ctx.lineCap = 'round';   // sewn-shut eyes
   for (const side of [-1, 1]) {
-    ctx.beginPath(); ctx.moveTo(side*R*.35, -R*.7); ctx.quadraticCurveTo(side*R*.75, -R*1.1, side*R*.55, -R*1.35);
-    ctx.quadraticCurveTo(side*R*.55, -R*1.0, side*R*.15, -R*.78); ctx.closePath(); ctx.fill(); ctx.stroke();
-  }
-  blobPath(ctx, R, prof, t, 1.05, .95);
-  const g = ctx.createRadialGradient(-R*.3, -R*.4, R*.1, 0, 0, R*1.1);
-  g.addColorStop(0, '#4a3858'); g.addColorStop(.6, '#241b2e'); g.addColorStop(1, '#100b15');
-  ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = lw(R); ctx.stroke();
-  ctx.strokeStyle = 'rgba(170,110,230,.45)'; ctx.lineWidth = Math.max(1, R*.025);   // rim light
-  ctx.beginPath(); ctx.arc(0, 0, R*.93, -2.6, -1.2); ctx.stroke();
-  // slit eye
-  eye(ctx, 0, -R*.45, R*.22, look, '#f2c822', blinkAt(t, c.ph), true);
-  // the grin: corners up, chewing
-  const open = .45 + .3*(.5 + .5*Math.sin(t*2.4)), w = R*1.3, h = R*.55*open;
-  const top = u => -R*.02 + lerp(-h*.35, 0, 1 - u*u), bot = u => -R*.02 + lerp(-h*.35, h, 1 - u*u);
-  const path = () => {
-    ctx.beginPath();
-    for (let i = 0; i <= 20; i++) { const u = i/10 - 1, x = u*w/2; i ? ctx.lineTo(x, top(u) + R*.15) : ctx.moveTo(x, top(u) + R*.15); }
-    for (let i = 20; i >= 0; i--) { const u = i/10 - 1; ctx.lineTo(u*w/2, bot(u) + R*.15); }
-    ctx.closePath();
-  };
-  path(); ctx.strokeStyle = '#9c2f3e'; ctx.lineWidth = R*.13; ctx.lineJoin = 'round'; ctx.stroke();   // lips
-  ctx.fillStyle = '#3a0710'; ctx.fill();
-  ctx.save(); ctx.clip();
-  ctx.fillStyle = '#efe8d4'; ctx.strokeStyle = '#2a1a12'; ctx.lineWidth = Math.max(1, R*.015);
-  for (let i = 0; i < 9; i++) {                                         // upper teeth hang down
-    const u = (i + .5)/9*2 - 1, x = u*w/2, y = top(u) + R*.15, tw = w/10.5, th = R*.17*(1 - .4*u*u);
-    ctx.beginPath(); rrect(ctx, x - tw/2, y - 2, tw, th, tw*.35); ctx.fill(); ctx.stroke();
-  }
-  for (let i = 0; i < 8; i++) {                                         // lower teeth rise up
-    const u = (i + .5)/8*2 - 1, x = u*w/2, y = bot(u) + R*.15, tw = w/9.5, th = R*.15*(1 - .4*u*u);
-    ctx.beginPath(); rrect(ctx, x - tw/2, y - th + 2, tw, th, tw*.35); ctx.fill(); ctx.stroke();
+    const ex = hx + side*R*.19, ey = hy - R*.1;
+    ctx.beginPath(); ctx.moveTo(ex - R*.08, ey); ctx.quadraticCurveTo(ex, ey + R*.04, ex + R*.08, ey); ctx.stroke();
+    for (let k = -1; k <= 1; k++) { ctx.beginPath(); ctx.moveTo(ex + k*R*.05 - R*.015, ey - R*.04); ctx.lineTo(ex + k*R*.05 + R*.015, ey + R*.06); ctx.stroke(); }
   }
   ctx.restore();
-  path(); ctx.strokeStyle = INK; ctx.lineWidth = Math.max(1, R*.03); ctx.stroke();
-  // drool
-  const d = (t*.6) % 1;
-  ctx.strokeStyle = 'rgba(220,230,240,.6)'; ctx.lineWidth = Math.max(1, R*.02);
-  ctx.beginPath(); ctx.moveTo(R*.25, bot(.4) + R*.2); ctx.lineTo(R*.26, bot(.4) + R*.2 + R*.35*d); ctx.stroke();
+  gash(ctx, [hx + R*.01, hy - R*.38], [hx - R*.02, hy + R*.34], .1 + .12*(.5 + .5*Math.sin(t*1.9)), R, t, s + 4, { nTeeth:8, toothH:.09 });
+  ctx.save(); ctx.strokeStyle = 'rgba(210,220,230,.55)'; ctx.lineWidth = Math.max(.8, R*.015);   // drool
+  const d = (t*.5) % 1; ctx.beginPath(); ctx.moveTo(hx, hy + R*.34); ctx.lineTo(hx + R*.01, hy + R*.34 + R*.4*d); ctx.stroke(); ctx.restore();
 }
 
-/* ---- 指持ち Finger Bearer: the boss. A tall skull-like head crowned with fingers, cracks of fire ---- */
+/* ---- 指持ち Finger Bearer: the boss. A hunched mass with fingers for spines, a jaw across its body, eyes clustered off-centre ---- */
 function drawBearer(ctx, R, t, look, c) {
-  // crown of fingers
-  for (let i = 0; i < 7; i++) {
-    const a = -Math.PI/2 + (i - 3)*.32, len = R*(.55 + .12*Math.cos(i*1.7)), sway = Math.sin(t*1.5 + i)*.05;
-    ctx.save(); ctx.translate(Math.cos(a)*R*.55, -R*.35 + Math.sin(a)*R*.62); ctx.rotate(a + Math.PI/2 + sway);
-    const fw = R*.12;
-    ctx.fillStyle = '#cdb89a'; ctx.strokeStyle = INK; ctx.lineWidth = lw(R)*.7;
-    ctx.beginPath(); rrect(ctx, -fw/2, -len, fw, len, fw/2); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#8a6f68'; ctx.beginPath(); ctx.ellipse(0, -len + fw*.55, fw*.32, fw*.42, 0, 0, TAU); ctx.fill();   // nail
-    ctx.lineWidth = Math.max(1, R*.012);
-    for (const k of [.35, .65]) { ctx.beginPath(); ctx.moveTo(-fw*.3, -len*k); ctx.lineTo(fw*.3, -len*k); ctx.stroke(); }   // knuckles
-    ctx.restore();
+  const s = c.seed, pulse = .55 + .45*Math.sin(t*3);
+  for (let i = 0; i < 6; i++) {                                          // fingers growing out of its back
+    const a = -2.55 + i*.38, root = [Math.cos(a)*R*.7, Math.sin(a)*R*.55 + R*.05], sway = Math.sin(t*1.4 + i)*.08;
+    const pts = chain(root, a + sway, [[0, R*.32], [.25 + sway, R*.26], [.3, R*.18]]);
+    inked(ctx, taper(pts, [R*.14, R*.12, R*.1, R*.07]), R, t, s + i*5, { fill:SKIN.bone, shade:SKIN.boneShade, lw:.035 });
+    const tip = pts[3]; ctx.fillStyle = '#7e625c'; ctx.beginPath(); ctx.arc(tip[0], tip[1], R*.035, 0, TAU); ctx.fill();
   }
-  // head
-  ctx.beginPath(); ctx.ellipse(0, 0, R*.78, R*1.0, 0, 0, TAU);
-  const g = ctx.createRadialGradient(-R*.3, -R*.4, R*.1, 0, 0, R*1.1);
-  g.addColorStop(0, '#463648'); g.addColorStop(.6, '#241a28'); g.addColorStop(1, '#0d080f');
-  ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = lw(R); ctx.stroke();
-  // glowing cracks
-  const r = mulberry(c.seed + 11), pulse = .55 + .45*Math.sin(t*3);
+  const sw = Math.sin(t*1.5)*.12;
+  arm(ctx, [-R*.62, -R*.02], [-R*1.02, -R*.38], [-R*(1.08 + sw*.3), -R*(.78 + sw*.2)], R*.26, R, t, s + 60,   // raised claw
+      { fill:SKIN.dark, shade:SKIN.deep, hand:R*.55, curl:.6 + .3*Math.sin(t*2), side:1 });
+  arm(ctx, [R*.6, R*.18], [R*.98, R*.45], [R*1.04, R*.86], R*.26, R, t, s + 70,                                 // planted arm
+      { fill:SKIN.dark, shade:SKIN.deep, hand:R*.5, curl:.15, side:-1 });
+  const body = lump(s + 1, R*.9, { sx:1.0, sy:.84, cy:.12, bulge:[-.9, .15], t });
+  inked(ctx, body, R, t, s + 1, { fill:SKIN.dark, shade:SKIN.deep, hatch:10, lw:.04 });
+  const r = mulberry(s + 11);                                            // glowing cracks
   ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
-  for (let i = 0; i < 7; i++) {
-    let x = (r() - .5)*R*1.1, y = (r() - .5)*R*1.6; const pts = [[x, y]];
-    for (let j = 0; j < 4; j++) { x += (r() - .5)*R*.35; y += (r() - .3)*R*.3; pts.push([x, y]); }
-    for (const [w, a] of [[R*.06, .25], [R*.018, .9]]) {
-      ctx.strokeStyle = `rgba(255,${120 + 60*(w < R*.05)},40,${a*pulse})`; ctx.lineWidth = Math.max(1, w);
+  for (let i = 0; i < 6; i++) {
+    let x = (r() - .5)*R*1.1, y = (r() - .3)*R*1.0; const pts = [[x, y]];
+    for (let j = 0; j < 4; j++) { x += (r() - .5)*R*.3; y += (r() - .3)*R*.25; pts.push([x, y]); }
+    for (const [w, al] of [[R*.05, .22], [R*.016, .85]]) {
+      ctx.strokeStyle = `rgba(255,${w > R*.03 ? 90 : 160},40,${al*pulse})`; ctx.lineWidth = Math.max(1, w);
       ctx.beginPath(); pts.forEach(([px, py], k) => k ? ctx.lineTo(px, py) : ctx.moveTo(px, py)); ctx.stroke();
     }
   }
   ctx.restore();
-  // four eyes down the seam
-  eye(ctx, 0, -R*.45, R*.2, look, '#ff6a1a', blinkAt(t, 1));
-  eye(ctx, -R*.32, -R*.12, R*.16, look, '#ff6a1a', blinkAt(t, 2));
-  eye(ctx, R*.32, -R*.12, R*.16, look, '#ff6a1a', blinkAt(t, 3));
-  eye(ctx, 0, R*.1, R*.12, look, '#ffb21a', blinkAt(t, 4), true);
-  // jaw of long teeth, glowing throat
-  const open = .3 + .25*(.5 + .5*Math.sin(t*1.3)), mw = R*.9, my = R*.5, mh = R*.4*open + R*.08;
-  ctx.fillStyle = '#1a0402'; ctx.strokeStyle = INK; ctx.lineWidth = lw(R)*.8;
-  ctx.beginPath(); ctx.ellipse(0, my, mw/2, mh, 0, 0, TAU); ctx.fill();
-  ctx.save(); ctx.clip();
-  const tg = ctx.createRadialGradient(0, my, 0, 0, my, mw/2);
-  tg.addColorStop(0, `rgba(255,120,30,${.7*pulse})`); tg.addColorStop(1, 'rgba(255,60,0,0)');
-  ctx.fillStyle = tg; ctx.fillRect(-mw/2, my - mh, mw, mh*2);
-  ctx.fillStyle = '#e8dfc6'; ctx.strokeStyle = '#2a1a12'; ctx.lineWidth = Math.max(1, R*.012);
-  for (let i = 0; i < 9; i++) {
-    const x = (i/8 - .5)*mw*.92, tw = mw/12, th = R*.22*(1 - .5*Math.abs(i/8 - .5)*2);
-    ctx.beginPath(); ctx.moveTo(x - tw/2, my - mh); ctx.lineTo(x + tw/2, my - mh); ctx.lineTo(x, my - mh + th); ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(x - tw/2, my + mh); ctx.lineTo(x + tw/2, my + mh); ctx.lineTo(x, my + mh - th*.8); ctx.closePath(); ctx.fill(); ctx.stroke();
-  }
-  ctx.restore();
-  ctx.strokeStyle = INK; ctx.lineWidth = lw(R)*.8; ctx.beginPath(); ctx.ellipse(0, my, mw/2, mh, 0, 0, TAU); ctx.stroke();
+  eye(ctx, -R*.32, -R*.28, R*.17, look, '#ff6a1a', blinkAt(t, 1), { seed:s + 21, glow:true });
+  eye(ctx, -R*.06, -R*.42, R*.12, look, '#ff8a1a', blinkAt(t, 2), { seed:s + 22, glow:true });
+  eye(ctx, R*.2, -R*.24, R*.21, look, '#ff6a1a', blinkAt(t, 3), { seed:s + 23, glow:true, slit:true });
+  eye(ctx, -R*.5, -R*.02, R*.08, look, '#ffa21a', blinkAt(t, 4), { seed:s + 24, glow:true });
+  gash(ctx, [-R*.58, R*.3], [R*.6, R*.22], .14 + .14*(.5 + .5*Math.sin(t*1.3)), R, t, s + 30,
+       { nTeeth:11, toothH:.16, inside:'#1a0402', glow:`rgba(255,110,30,${.7*pulse})` });
 }
 
 /** Inside Unlimited Void: the curse is frozen, flooded with information. Horizontal glitch slices. */

@@ -14,7 +14,8 @@ Video never leaves your device: tracking runs locally with [MediaPipe](https://a
 ```
 track-lab/
 ├── index.html                 hub: gallery of experiences
-├── assets/                    hub-only styles, script, favicon
+├── assets/                    hub-only styles and script
+├── brand/<slug>/              logos: mark.svg (colour), mark-mono.svg; track-lab/ also has favicon.svg
 ├── experiences/
 │   ├── registry.js            list of experiences the hub renders (one entry each)
 │   ├── _template/             starter copied by `npm run new`
