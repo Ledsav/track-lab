@@ -12,7 +12,7 @@ function renderGrid() {
     return `<li><a class="card" href="experiences/${esc(e.slug)}/">
       <div class="cover">
         <div class="wash" style="background:${esc(wash)}"></div>
-        <div class="glyph">${esc(e.cover?.glyph || '◎')}</div>
+        ${e.cover?.logo ? `<img class="logo" src="${esc(e.cover.logo)}" alt="">` : `<div class="glyph">${esc(e.cover?.glyph || '◎')}</div>`}
         <div class="frame"></div>
         <span class="tracker">◉ ${esc(e.tracker)}</span>
         <span class="idx">${String(i + 1).padStart(2, '0')}</span>

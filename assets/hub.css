@@ -43,6 +43,8 @@ h2 { margin:0; font-family:var(--display); font-weight:400; font-size:13px; lett
 .card:hover .wash { transform:scale(1.08) rotate(4deg); }
 .cover .glyph { position:absolute; inset:0; display:grid; place-items:center; font-family:"Shippori Mincho","Yu Mincho","Hiragino Mincho ProN",serif; font-weight:800;
   font-size:clamp(84px, 11vw, 132px); color:#fff; text-shadow:0 0 40px rgba(255,255,255,.35); mix-blend-mode:overlay; }
+.cover .logo { position:absolute; left:50%; top:50%; width:38%; max-width:150px; aspect-ratio:1; transform:translate(-50%,-50%); filter:drop-shadow(0 6px 24px rgba(0,0,0,.45)); transition:transform .5s cubic-bezier(.2,.8,.2,1); }
+.card:hover .logo { transform:translate(-50%,-50%) scale(1.05); }
 .cover .frame { position:absolute; inset:14px; pointer-events:none;
   background:
     linear-gradient(var(--fg),var(--fg)) top left/14px 1px, linear-gradient(var(--fg),var(--fg)) top left/1px 14px,
