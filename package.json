@@ -1,0 +1,14 @@
+{
+  "name": "track-lab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Motion-tracking experiences that run entirely in the browser.",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "new": "node scripts/new-experience.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

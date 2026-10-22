@@ -1,0 +1,29 @@
+/* Minimal chrome for an experience: full-screen camera stage, start overlay, back link.
+   Experiences with their own look (e.g. cursed-hands) can skip this file entirely. */
+:root {
+  color-scheme: dark;
+  --bg:#050507; --fg:#e8e6e1; --muted:#8a8e96; --line2:rgba(232,230,225,.2); --accent:#d6ff3d;
+  --display:"Oswald","Arial Narrow",sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+  --st:env(safe-area-inset-top,0px); --sb:env(safe-area-inset-bottom,0px); --sl:env(safe-area-inset-left,0px); --sr:env(safe-area-inset-right,0px);
+}
+* { box-sizing:border-box; }
+html, body { height:100%; }
+body { margin:0; overflow:hidden; background:var(--bg); color:var(--fg); font-family:system-ui,-apple-system,"Segoe UI",sans-serif; -webkit-tap-highlight-color:transparent; }
+
+.stage { position:fixed; inset:0; background:#000; }
+.stage canvas { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+
+.overlay { position:fixed; inset:0; z-index:5; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; padding:24px; text-align:center; background:var(--bg); }
+.overlay h1 { margin:0; font-family:var(--display); font-weight:300; font-size:clamp(40px,9vmin,96px); letter-spacing:.2em; text-indent:.2em; text-transform:uppercase; line-height:1; }
+.overlay p { margin:0; max-width:460px; font-family:var(--mono); font-size:12px; line-height:2; letter-spacing:.08em; color:var(--muted); }
+.overlay .err { color:#ff8a8a; }
+.running .overlay { display:none; }
+
+button { font-family:var(--display); font-weight:500; font-size:14px; letter-spacing:.3em; text-transform:uppercase; color:var(--fg); cursor:pointer;
+  background:transparent; border:1px solid var(--fg); padding:16px 40px; transition:background .2s, color .2s; }
+button:hover:not(:disabled) { background:var(--fg); color:var(--bg); }
+button:disabled { opacity:.45; cursor:default; }
+
+.back { position:fixed; z-index:10; top:calc(16px + var(--st)); left:calc(16px + var(--sl)); font-family:var(--mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--fg); text-decoration:none; padding:8px 12px; background:rgba(9,10,15,.6); border:1px solid var(--line2); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+.back:hover { border-color:var(--fg); }
