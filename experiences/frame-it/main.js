@@ -30,10 +30,14 @@ const CONFIG = {
     thumbOut:.5,               // thumb tip ↔ index knuckle, × hand size: above = thumb stuck out
     frameAngle:20,             // degrees between thumb and index for a framing hand (an L or a C)
     openGap:.55,               // …with thumb and index tips at least this far apart, × hand size
-    pressDead:.06,             // shutter: index dips toward the thumb; ignore dips smaller than this share of the resting gap (jitter)
-    pressDepth:.3,             // …a dip of this share of the resting gap is a full press: the shot fires
-    pressRelease:.12,          // …back within this of rest = button released, ready for the next shot
-    restAdapt:.06,             // how fast the resting gap follows a hand that relaxes (per reading, not while pressing)
+    // shutter press: one index fingertip dips toward its thumb, measured as a share of that hand's resting gap.
+    // Tuned on a real camera-grip clip: at rest the dip wobbles ~0.02 (p90), 0.23 (p99), 0.35 at worst (a re-grip),
+    // never above 0.35 for two readings in a row.
+    pressDead:.2,              // the ring starts filling above this dip (below it is tracking wobble)
+    pressDepth:.42,            // …a dip this deep is a full press
+    pressHold:3,               // …held for this many readings in a row (~0.1 s) fires the shot
+    pressRelease:.15,          // …back above this = button released, ready for the next shot
+    restWindow:45,             // resting gap = median of this many recent readings (~1.5 s) of that hand at rest
     smooth:.5,                 // frame corner smoothing (1 = raw)
     openFrames:3,              // consecutive frame readings before the lens opens
     graceMs:180,               // the lens stays open this long after the frame is lost
@@ -245,28 +249,32 @@ class Motion {
 /**
  * Shutter button: in the camera grip the index fingers sit on top, like on a camera body. Pressing one
  * down (its tip dips toward the thumb) is a half-press, then a full press that fires, like a real shutter.
- * The dip is measured against that hand's own resting thumb–index gap, so it adapts to the hand.
- * progress[side] (0..1) drives the ring; focus fires once at half-press; the button must be released
- * (finger back up) before the next shot. Needs the frame up (or just up), the other hand still framing,
- * and nothing moving away. A full pinch is just a deeper press, so it works too.
+ * - The dip is measured against that hand's own resting gap: the median of its recent at-rest readings
+ *   (a running max latched onto tracking spikes and made the shutter hair-trigger).
+ * - Only a dip in ONE hand counts: whatever both hands do together (moving, tilting the grip) is subtracted.
+ * - A full press has to hold for pressHold readings, and the button must come back up before the next shot.
+ * progress[side] (0..1) drives the ring; focus fires once at half-press. A full pinch is a deeper press.
  */
 class SnapDetector {
-  constructor() { this.rest = [0, 0]; this.lastL = [-1e9, -1e9]; this.progress = [0, 0]; this.latched = [false, false]; this.focused = [false, false]; this.lastSnap = -1e9; }
+  constructor() { this.hist = [[], []]; this.lastL = [-1e9, -1e9]; this.progress = [0, 0]; this.held = [0, 0]; this.half = [0, 0]; this.latched = [false, false]; this.focused = [false, false]; this.lastSnap = -1e9; }
+  base(s) { const h = this.hist[s]; if (h.length < 10) return 0; const x = [...h].sort((p, q) => p - q); return x[x.length >> 1]; }
   update(sides, t, frame, motion) {
     const G = CONFIG.gesture, armed = t - frame.lastOpen < G.snapArmMs;
     let fire = false, focus = false;
     for (const s of [0, 1]) if (sides[s] && sides[s].L) this.lastL[s] = t;
+    const depth = [0, 1].map(s => { const h = sides[s], b = this.base(s); return h && b ? (b - h.gap)/b : 0; });
     for (const s of [0, 1]) {
       const h = sides[s];
-      if (!h) { this.rest[s] = 0; this.progress[s] = 0; this.latched[s] = this.focused[s] = false; continue; }
-      const framing = armed && t - this.lastL[1 - s] < G.otherLMs;
-      if (!this.rest[s] || (h.L && h.gap > this.rest[s])) this.rest[s] = h.gap;          // finger fully up: that's the new rest
-      const depth = clamp((this.rest[s] - h.gap)/this.rest[s], 0, 1);
-      if (depth < G.pressRelease) this.latched[s] = this.focused[s] = false;              // button up
-      if (depth < G.pressDead && h.L) this.rest[s] += (h.gap - this.rest[s])*G.restAdapt;  // only a finger truly at rest moves the baseline
-      this.progress[s] = framing && !this.latched[s] ? clamp((depth - G.pressDead)/(G.pressDepth - G.pressDead), 0, 1) : 0;
-      if (this.progress[s] > .55 && !this.focused[s]) { this.focused[s] = true; focus = true; }          // half-press: focus beep
-      if (this.progress[s] >= 1 && motion.still() && t - this.lastSnap > 600) { fire = true; this.latched[s] = true; this.progress[s] = 0; }
+      if (!h) { this.hist[s].length = 0; this.progress[s] = this.held[s] = 0; this.latched[s] = this.focused[s] = false; continue; }
+      if (h.L && depth[s] < G.pressRelease) { this.hist[s].push(h.gap); if (this.hist[s].length > G.restWindow) this.hist[s].shift(); }   // at rest: feeds the baseline
+      const press = depth[s] - Math.max(0, depth[1 - s]);                                  // this hand's dip, minus what both hands do together
+      if (press < G.pressRelease) this.latched[s] = this.focused[s] = false;               // button up
+      const framing = armed && t - this.lastL[1 - s] < G.otherLMs && this.base(s) > 0 && motion.still();   // re-gripping / moving: no ring, no beep
+      this.progress[s] = framing && !this.latched[s] ? clamp((press - G.pressDead)/(G.pressDepth - G.pressDead), 0, 1) : 0;
+      this.held[s] = this.progress[s] >= 1 ? this.held[s] + 1 : 0;
+      this.half[s] = this.progress[s] > .5 ? this.half[s] + 1 : 0;
+      if (this.half[s] >= 2 && !this.focused[s]) { this.focused[s] = true; focus = true; }                // half-press held a moment: focus beep
+      if (this.held[s] >= G.pressHold && motion.still() && t - this.lastSnap > 600) { fire = true; this.latched[s] = true; this.progress[s] = this.held[s] = 0; }
     }
     if (fire) this.lastSnap = t;
     return { fire, focus };
