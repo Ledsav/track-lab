@@ -3,12 +3,12 @@
    -----------------------------------------------------------------------------
    An instant camera made of your fingers. Two L-shaped hands make a director's frame;
    inside it the world turns into another lens; tilting the frame like a dial switches
-   lens; pinching one hand (the other keeps its corner) takes a polaroid.
+   lens; pressing an index finger down like a shutter button takes a polaroid.
 
    1. Config       every tunable number in one place
    2. Sound        WebAudio synth: shutter, film advance, lens boot / switch, printer motor, lens hum
    3. Gestures     landmarks → hand reading (L, thumb–index gap)
-   4. Frame        director's-frame quad with smoothing, one-hand snap, tilt dial
+   4. Frame        frame quad with smoothing, shutter press, tilt dial
    5. Panel        lens dial, viewfinder readouts, hint, settings sheet
    6. App          tracking, main loop, render order
 
@@ -30,8 +30,10 @@ const CONFIG = {
     thumbOut:.5,               // thumb tip ↔ index knuckle, × hand size: above = thumb stuck out
     frameAngle:20,             // degrees between thumb and index for a framing hand (an L or a C)
     openGap:.55,               // …with thumb and index tips at least this far apart, × hand size
-    pinch:.3,                  // thumb tip ↔ index tip, × hand size: below = pinched (fires the shutter)
-    pinchStart:.75,            // …the shutter ring starts filling when the gap drops below this
+    pressDead:.06,             // shutter: index dips toward the thumb; ignore dips smaller than this share of the resting gap (jitter)
+    pressDepth:.3,             // …a dip of this share of the resting gap is a full press: the shot fires
+    pressRelease:.12,          // …back within this of rest = button released, ready for the next shot
+    restAdapt:.06,             // how fast the resting gap follows a hand that relaxes (per reading, not while pressing)
     smooth:.5,                 // frame corner smoothing (1 = raw)
     openFrames:3,              // consecutive frame readings before the lens opens
     graceMs:180,               // the lens stays open this long after the frame is lost
@@ -122,6 +124,7 @@ function createSound(getLevels) {
     shutter: () => { noise(.035, { type:'highpass', f0:6000, f1:3000, gain:.6 }); tone('square', 1800, 600, .02, { gain:.15 }); noise(.05, { f0:2500, f1:900, q:2, gain:.45, delay:.07 }); },   // blade + mirror slap
     advance: () => { for (let i = 0; i < 6; i++) noise(.025, { type:'highpass', f0:2600, f1:2200, gain:.18, delay:i*.055 }); noise(.4, { f0:700, f1:1100, q:3, gain:.12 }); },
     motor:   () => { tone('sawtooth', 62, 66, 1.6, { gain:.06, attack:.05 }); noise(1.6, { f0:1100, f1:1300, q:4, gain:.12, attack:.06 }); for (let i = 0; i < 12; i++) noise(.02, { type:'highpass', f0:3200, f1:3000, gain:.08, delay:i*.12 }); },
+    focus:   () => { tone('sine', 2093, 2093, .045, { gain:.05 }); tone('sine', 2093, 2093, .045, { gain:.05, delay:.08 }); },   // half-press beep-beep
     done:    () => { tone('sine', 1320, 1320, .12, { gain:.08 }); tone('sine', 1760, 1760, .14, { gain:.06, delay:.08 }); },
   };
   return {
@@ -240,26 +243,33 @@ class Motion {
 }
 
 /**
- * Snap = pinch ONE hand while the other keeps its corner. Pinching breaks that hand's L long before
- * the fingers meet, so the frame is allowed to have been whole up to snapArmMs ago, as long as the
- * other hand is still an L and nothing is moving away. progress[side] (0..1) drives the shutter ring.
+ * Shutter button: in the camera grip the index fingers sit on top, like on a camera body. Pressing one
+ * down (its tip dips toward the thumb) is a half-press, then a full press that fires, like a real shutter.
+ * The dip is measured against that hand's own resting thumb–index gap, so it adapts to the hand.
+ * progress[side] (0..1) drives the ring; focus fires once at half-press; the button must be released
+ * (finger back up) before the next shot. Needs the frame up (or just up), the other hand still framing,
+ * and nothing moving away. A full pinch is just a deeper press, so it works too.
  */
 class SnapDetector {
-  constructor() { this.prev = [false, false]; this.lastL = [-1e9, -1e9]; this.progress = [0, 0]; this.latched = [false, false]; this.lastSnap = -1e9; }
+  constructor() { this.rest = [0, 0]; this.lastL = [-1e9, -1e9]; this.progress = [0, 0]; this.latched = [false, false]; this.focused = [false, false]; this.lastSnap = -1e9; }
   update(sides, t, frame, motion) {
     const G = CONFIG.gesture, armed = t - frame.lastOpen < G.snapArmMs;
-    let fire = false;
+    let fire = false, focus = false;
     for (const s of [0, 1]) if (sides[s] && sides[s].L) this.lastL[s] = t;
     for (const s of [0, 1]) {
-      const h = sides[s], framing = armed && t - this.lastL[1 - s] < G.otherLMs;
-      if (!h || h.gap > G.pinchStart) this.latched[s] = false;              // fingers opened again: ready for the next shot
-      this.progress[s] = h && framing && !this.latched[s] ? clamp((G.pinchStart - h.gap)/(G.pinchStart - G.pinch), 0, 1) : 0;
-      const now = !!(h && h.gap < G.pinch);
-      if (now && !this.prev[s] && framing && !this.latched[s] && motion.still() && t - this.lastSnap > 700) { fire = true; this.latched[s] = true; }
-      this.prev[s] = now;
+      const h = sides[s];
+      if (!h) { this.rest[s] = 0; this.progress[s] = 0; this.latched[s] = this.focused[s] = false; continue; }
+      const framing = armed && t - this.lastL[1 - s] < G.otherLMs;
+      if (!this.rest[s] || (h.L && h.gap > this.rest[s])) this.rest[s] = h.gap;          // finger fully up: that's the new rest
+      const depth = clamp((this.rest[s] - h.gap)/this.rest[s], 0, 1);
+      if (depth < G.pressRelease) this.latched[s] = this.focused[s] = false;              // button up
+      if (depth < G.pressDead && h.L) this.rest[s] += (h.gap - this.rest[s])*G.restAdapt;  // only a finger truly at rest moves the baseline
+      this.progress[s] = framing && !this.latched[s] ? clamp((depth - G.pressDead)/(G.pressDepth - G.pressDead), 0, 1) : 0;
+      if (this.progress[s] > .55 && !this.focused[s]) { this.focused[s] = true; focus = true; }          // half-press: focus beep
+      if (this.progress[s] >= 1 && motion.still() && t - this.lastSnap > 600) { fire = true; this.latched[s] = true; this.progress[s] = 0; }
     }
-    if (fire) { this.lastSnap = t; this.progress = [0, 0]; }
-    return fire;
+    if (fire) this.lastSnap = t;
+    return { fire, focus };
   }
   get pinching() { return Math.max(...this.progress) > .05; }
 }
@@ -396,7 +406,9 @@ class App {
     if (!this.snaps.pinching && F.open) this.cleanQuad = F.quad.map(p => ({ ...p }));   // the frame before any pinch moved a thumb
     const turn = this.snaps.pinching ? 0 : this.dial.update(F, t);
     if (turn) this.switchLens(turn);
-    if (this.snaps.update(sides, t, F, this.motion)) this.snap(this.cleanQuad || F.quad);
+    const shutter = this.snaps.update(sides, t, F, this.motion);
+    if (shutter.focus) this.sound.shot('focus');
+    if (shutter.fire) this.snap(this.cleanQuad || F.quad);
     // keep the lens up, and still, while a pinch closes, including the moment where the pinching hand
     // has stopped being an L but the ring hasn't started yet (the other hand still holds its corner)
     const cornerHeld = sides.some(h => h && h.L);
@@ -530,12 +542,12 @@ class App {
     ctx.restore();
   }
 
-  /** Shutter ring at a pinching hand: fills as thumb and index close, like half-pressing a shutter button. */
+  /** Shutter ring under the pressing fingertip: fills as the finger presses down (half-press → full press). */
   shutterRings(ctx, u) {
     const pr = this.snaps.progress;
     this.sides.forEach((h, s) => {
       if (!h || pr[s] < .08) return;
-      const c = { x:(h.thumbTip.x + h.indexTip.x)/2, y:(h.thumbTip.y + h.indexTip.y)/2 }, R = Math.max(u*.035, h.size*.42);
+      const c = { x:h.indexTip.x, y:h.indexTip.y }, R = Math.max(u*.03, h.size*.3);
       ctx.save(); ctx.lineCap = 'round'; ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 5;
       ctx.strokeStyle = 'rgba(255,246,228,.4)'; ctx.lineWidth = Math.max(2, u*.006); ctx.beginPath(); ctx.arc(c.x, c.y, R, 0, Math.PI*2); ctx.stroke();
       ctx.strokeStyle = '#d2402a'; ctx.lineWidth = Math.max(3, u*.01);
