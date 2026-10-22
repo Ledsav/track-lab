@@ -28,7 +28,8 @@ const CONFIG = {
   gesture: {
     extendRatio:1.1,           // tip this much farther from the wrist than the PIP joint = finger extended
     thumbOut:.5,               // thumb tip ↔ index knuckle, × hand size: above = thumb stuck out
-    lMinAngle:35,              // degrees between thumb and index for an L
+    frameAngle:20,             // degrees between thumb and index for a framing hand (an L or a C)
+    openGap:.55,               // …with thumb and index tips at least this far apart, × hand size
     pinch:.3,                  // thumb tip ↔ index tip, × hand size: below = pinched (fires the shutter)
     pinchStart:.75,            // …the shutter ring starts filling when the gap drops below this
     smooth:.5,                 // frame corner smoothing (1 = raw)
@@ -133,34 +134,40 @@ function createSound(getLevels) {
 /* ============================== 3. GESTURES ============================== */
 /**
  * One hand → { pts, size, center, L, gap, thumbTip, indexTip, vtx, thumbDir, indexDir, note }.
- * L: index straight + thumb stuck out at an angle to it (the corner of a director's frame).
+ * L = a framing hand: thumb out, thumb and index tips well apart, middle and ring fingers folded. That covers
+ * a director's L and the camera grip's C (index curled over the top), and rules out open palms.
+ * Measured on a real camera-grip clip: middle/ring ≈ 0.6–0.7 of their PIP distance (folded), gap ≈ 1.3.
  */
 function readHand(lm, W, H) {
   const G = CONFIG.gesture, pts = toMirrored(lm, W, H), size = dist(pts[0], pts[9]) || 1;
   const ext = (tip, pip) => dist(pts[tip], pts[0]) > dist(pts[pip], pts[0])*G.extendRatio;
-  const index = ext(8, 6);
+  const index = ext(8, 6), middle = ext(12, 10), ring = ext(16, 14);
   const thumb = dist(pts[4], pts[5])/size, gap = dist(pts[4], pts[8])/size;
   const tv = { x:pts[4].x - pts[2].x, y:pts[4].y - pts[2].y }, iv = { x:pts[8].x - pts[5].x, y:pts[8].y - pts[5].y };
   const cos = (tv.x*iv.x + tv.y*iv.y)/((Math.hypot(tv.x, tv.y)*Math.hypot(iv.x, iv.y)) || 1), ang = Math.acos(clamp(cos, -1, 1))*180/Math.PI;
-  const L = index && thumb > G.thumbOut && ang > G.lMinAngle;
+  const L = thumb > G.thumbOut && gap > G.openGap && ang > G.frameAngle && !middle && !ring;
   const unit = v => { const l = Math.hypot(v.x, v.y) || 1; return { x:v.x/l, y:v.y/l }; };
   return { pts, size, center:pts[9], L, gap, thumbTip:pts[4], indexTip:pts[8],
            vtx:{ x:(pts[2].x + pts[5].x)/2, y:(pts[2].y + pts[5].y)/2 },     // the corner of the L, where thumb meets index
            thumbDir:unit(tv), indexDir:unit(iv),
-           note:`i${+index} t${thumb.toFixed(2)} a${ang | 0} gap${gap.toFixed(2)}` };
+           note:`i${+index} m${+middle} r${+ring} t${thumb.toFixed(2)} a${ang | 0} gap${gap.toFixed(2)}` };
 }
 
 /**
- * The frame two L hands enclose, however they're held: corners diagonal (director's frame) or both at
- * the bottom like holding a camera, index fingers up and thumbs along the bottom.
- * Its tilt is the average direction of the two index fingers (modulo 90°, so up/down/sideways agree; thumbs
- * rotate when you pinch, so they don't steer it);
- * its extent is the box, in that tilted frame, around both L corners and both index fingertips. Thumbs
- * are left out (they move when you pinch to take the photo) unless the box would otherwise be flat,
- * e.g. a hold with thumbs pointing up and index fingers sideways.
- * Returns [TL, TR, BR, BL] in the frame's own axes.
+ * The window two framing hands make. Two grips:
+ * - Camera grip (both index fingers point the same way, e.g. both up): each hand is a C facing the other,
+ *   and the window is the four fingertips: index tips on top, thumb tips underneath, between the hands.
+ * - Director's frame (index fingers point opposite ways, L corners diagonal): the box, tilted to the index
+ *   fingers, around both L corners and index tips (thumbs only if the box would otherwise be flat).
+ * Returns [TL, TR, BR, BL].
  */
 function frameQuad(a, b) {
+  if (a.indexDir.y*b.indexDir.y > 0) {
+    const [l, r] = a.center.x <= b.center.x ? [a, b] : [b, a];
+    const tips = h => h.indexTip.y <= h.thumbTip.y ? [h.indexTip, h.thumbTip] : [h.thumbTip, h.indexTip];   // [upper, lower]
+    const [lt, lb] = tips(l), [rt, rb] = tips(r);
+    return [lt, rt, rb, lb].map(p => ({ x:p.x, y:p.y }));
+  }
   let cx = 0, sy = 0;
   for (const d of [a.indexDir, b.indexDir]) { const k = Math.atan2(d.y, d.x)*4; cx += Math.cos(k); sy += Math.sin(k); }
   const th = Math.atan2(sy, cx)/4, c = Math.cos(th), s = Math.sin(th);
@@ -176,7 +183,7 @@ function frameQuad(a, b) {
 }
 
 /* ============================== 4. FRAME ============================== */
-/** The lens: the director's frame between two L hands, smoothed. */
+/** The lens: the window between two framing hands, smoothed. */
 class FrameTracker {
   constructor() { this.open = false; this.openSince = 0; this.lastOpen = -1e9; this.count = 0; this.lastSeen = -1e9; this.quad = null; }
   update(hands, t, W, H) {
