@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07080b">
+<meta name="description" content="How Track Lab handles your camera: everything is processed on your device, nothing is uploaded, and there are no cookies or trackers.">
+<title>Privacy – Track Lab</title>
+<link rel="canonical" href="https://www.albertovaldesrey.com/track-lab/privacy.html">
+<link rel="icon" href="assets/icons/favicon.ico" sizes="48x48">
+<link rel="icon" href="brand/track-lab/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+<link rel="manifest" href="assets/icons/site.webmanifest">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Track Lab">
+<meta property="og:title" content="Privacy – Track Lab">
+<meta property="og:description" content="Everything runs on your device. Nothing is uploaded. No cookies, no trackers.">
+<meta property="og:url" content="https://www.albertovaldesrey.com/track-lab/privacy.html">
+<meta property="og:image" content="https://www.albertovaldesrey.com/track-lab/assets/social/track-lab.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/hub.css">
+<style>
+  .doc { max-width:720px; padding:72px var(--gutter) 64px; }
+  .doc .back { font-family:var(--mono); font-size:12px; letter-spacing:.1em; color:var(--muted); text-decoration:none; }
+  .doc .back:hover, .doc .back:focus-visible { color:var(--fg); }
+  .doc h1 { margin:28px 0 12px; font-size:clamp(56px, 10vw, 96px); }
+  .doc .lede { margin:0 0 40px; max-width:44ch; }
+  .doc h2 { margin:40px 0 12px; font-size:13px; }
+  .doc p, .doc li { color:#b9bcc2; line-height:1.65; }
+  .doc ul { padding-left:20px; }
+  .doc code { font-family:var(--mono); font-size:13px; color:var(--fg); }
+  .doc a { color:var(--fg); }
+</style>
+</head>
+<body>
+<main class="doc">
+  <a class="back" href="./">‹ Track Lab</a>
+  <h1>Privacy</h1>
+  <p class="lede">The short version: your camera image never leaves your device. There are no accounts, no cookies and no trackers.</p>
+
+  <h2>Your camera</h2>
+  <p>When you start an experience, your browser asks for the camera. Every frame is analysed right there in the browser by the tracking models (hand, face and hair detection). No frame is uploaded, recorded or stored anywhere.</p>
+
+  <h2>Photos you take in Frame It</h2>
+  <p>Polaroids live in the page's memory only. They are saved to your device when you press <em>Print &amp; save</em> or <em>Share</em>, and they disappear when you close or reload the page.</p>
+
+  <h2>What your browser downloads</h2>
+  <p>Like any website, these servers see a normal request from your browser (including your IP address) when the page loads what it needs:</p>
+  <ul>
+    <li>GitHub Pages hosts the site itself.</li>
+    <li><code>cdn.jsdelivr.net</code> and <code>storage.googleapis.com</code> serve the tracking code and models (MediaPipe).</li>
+    <li>Google Fonts serves the typefaces.</li>
+  </ul>
+  <p>None of them receive your camera image or anything you do on the page.</p>
+
+  <h2>Voice in Cursed Hands</h2>
+  <p>The Japanese call-outs use your browser's built-in speech. Some browsers use online voices for this (for example Chrome's Google voices or Edge's "Online" voices), which sends the fixed call-out text, such as <em>ryōiki tenkai</em>, to that provider. You can switch the voice off in Settings.</p>
+
+  <h2>What is kept on your device</h2>
+  <p>Your settings (volumes, toggles) and your best exorcism score are saved in your browser's local storage so they survive a reload. They never leave your device; clearing this site's data in your browser removes them.</p>
+
+  <h2>Questions</h2>
+  <p>The whole site is open source: <a href="https://github.com/Ledsav/track-lab" rel="noopener">github.com/Ledsav/track-lab</a>. Open an issue there with any question.</p>
+</main>
+</body>
+</html>

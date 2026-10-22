@@ -6,3 +6,4 @@ Thumbs.db
 *.log
 .claude/*
 !.claude/skills/
+.lighthouseci/

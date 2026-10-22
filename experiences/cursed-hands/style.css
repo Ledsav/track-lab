@@ -90,7 +90,7 @@ h2::after { content:""; flex:1; height:1px; background:var(--line); }
 .bar > i { display:block; height:100%; width:0; background:var(--c); box-shadow:0 0 10px var(--c); }
 .tip { padding-top:10px; border-top:1px solid var(--line); font-size:12px; line-height:1.6; color:#959aa2; }
 .tip b { font-family:var(--latin); font-weight:500; letter-spacing:.2em; font-size:11px; text-transform:uppercase; color:var(--fg); }
-label.sw { display:flex; align-items:center; gap:10px; font-size:12px; color:#959aa2; cursor:pointer; min-height:28px; }
+.sw, .sw-tog { display:flex; align-items:center; gap:10px; font-size:12px; color:#959aa2; cursor:pointer; min-height:28px; }
 input[type=checkbox], input[type=range] { accent-color:var(--fg); }
 .calib { padding:12px 14px; border:1px dashed var(--line2); font-size:12px; line-height:1.6; color:#959aa2; }
 .calib b { font-family:var(--latin); font-weight:500; letter-spacing:.2em; font-size:11px; text-transform:uppercase; color:#c7a8ff; }
@@ -118,6 +118,7 @@ input[type=checkbox], input[type=range] { accent-color:var(--fg); }
 }
 
 /* ---------- settings rows ---------- */
+.sw-tog { min-height:0; }
 .sw input[type=range] { flex:1; min-width:0; }
 .sw .lbl { min-width:62px; }
 .sw .val { width:36px; text-align:right; font-family:ui-monospace,monospace; }

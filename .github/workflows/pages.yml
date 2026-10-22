@@ -25,6 +25,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - run: node scripts/sitemap.mjs           # list every experience in the registry
       # every deploy gets fresh file URLs, so browsers never mix cached files from two deploys
       - run: node scripts/stamp.mjs "${GITHUB_SHA::8}"
       - uses: actions/configure-pages@v5

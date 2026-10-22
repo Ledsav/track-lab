@@ -6,7 +6,21 @@
 <meta name="theme-color" content="#050507">
 <meta name="description" content="Jujutsu Kaisen hand-seal techniques with live hand tracking: Unlimited Void, Blue, Red and Hollow Purple. Runs locally in your browser.">
 <title>Cursed Hands – Track Lab</title>
+<link rel="canonical" href="https://www.albertovaldesrey.com/track-lab/experiences/cursed-hands/">
+<link rel="icon" href="../../assets/icons/favicon.ico" sizes="48x48">
 <link rel="icon" href="../../brand/cursed-hands/mark.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../../brand/cursed-hands/apple-touch-icon.png">
+<link rel="manifest" href="../../assets/icons/site.webmanifest">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Track Lab">
+<meta property="og:title" content="Cursed Hands – Track Lab">
+<meta property="og:description" content="Jujutsu Kaisen hand-seal techniques with live hand tracking: Unlimited Void, Blue, Red and Hollow Purple. Runs locally in your browser.">
+<meta property="og:url" content="https://www.albertovaldesrey.com/track-lab/experiences/cursed-hands/">
+<meta property="og:image" content="https://www.albertovaldesrey.com/track-lab/assets/social/cursed-hands.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Cursed Hands: Jujutsu Kaisen hand seals with live hand tracking">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;600&family=Shippori+Mincho:wght@600;800&family=Yuji+Syuku&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
@@ -20,6 +34,7 @@
 </script>
 </head>
 <body>
+<noscript><p style="margin:0;padding:14px 18px;background:#d2402a;color:#fff;font:15px/1.4 system-ui,sans-serif;text-align:center">Track Lab needs JavaScript (and a camera) to run.</p></noscript>
 <div class="app" id="app">
   <div class="stage">
     <video id="video" playsinline muted style="display:none"></video>
@@ -29,7 +44,7 @@
       <div class="big">呪術</div>
       <div class="sub">Cursed Hands</div>
       <div class="small">Allow camera access · stand back so your hands are visible<br>everything runs locally in your browser</div>
-      <div class="starts"><button id="start" class="primary">Free play</button><button id="startWaves" class="primary seal-btn">Exorcism waves</button></div>
+      <div class="starts"><button type="button" id="start" class="primary">Free play</button><button type="button" id="startWaves" class="primary seal-btn">Exorcism waves</button></div>
       <div id="err"></div>
     </div>
   </div>
@@ -41,10 +56,10 @@
     </a>
     <div class="actions">
       <span class="rec" id="rec"><i></i>LIVE</span>
-      <button class="icon kanji" id="waveBtn" title="Exorcism waves: start / stop" aria-label="Start or stop exorcism waves">祓</button>
-      <button class="icon" id="musicBtn" title="Music on / off" aria-label="Toggle music">♪</button>
-      <button class="icon" id="fsBtn" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
-      <button class="icon" id="panelBtn" title="Techniques & settings" aria-label="Techniques and settings">☰</button>
+      <button type="button" class="icon kanji" id="waveBtn" title="Exorcism waves: start / stop" aria-label="Start or stop exorcism waves">祓</button>
+      <button type="button" class="icon" id="musicBtn" title="Music on / off" aria-label="Toggle music">♪</button>
+      <button type="button" class="icon" id="fsBtn" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
+      <button type="button" class="icon" id="panelBtn" title="Techniques & settings" aria-label="Techniques and settings">☰</button>
     </div>
   </header>
 
@@ -64,7 +79,7 @@
     <div class="gt">The curses got through</div>
     <div class="gscore" id="oScore">0</div>
     <div class="gstats">Wave <b id="oWave">0</b> · <b id="oKills">0</b> exorcised · <span id="oBest"></span></div>
-    <div class="gbtns"><button id="againBtn" class="primary">Again</button><button id="freeBtn">Free play</button></div>
+    <div class="gbtns"><button type="button" id="againBtn" class="primary">Again</button><button type="button" id="freeBtn">Free play</button></div>
   </div>
 
   <aside class="panel" id="panel" aria-label="Techniques and settings">
@@ -72,13 +87,13 @@
     <h2>Exorcism</h2>
     <div class="game-box">
       <p>Curses crawl out of the dark and come at you. Exorcise them before they reach the camera. Red knocks them back, Blue drags them into its well, Hollow Purple erases a whole line, Unlimited Void freezes everything for 5 s.</p>
-      <div class="row"><button id="gameBtn">Start waves</button><span class="best">Best <b id="best">0</b></span></div>
+      <div class="row"><button type="button" id="gameBtn">Start waves</button><span class="best">Best <b id="best">0</b></span></div>
     </div>
     <h2>Face</h2>
     <div class="face-box">
       <div class="presets"><button id="gojoBtn" class="mini" type="button">Gojo · 白髪 六眼</button><button id="faceOffBtn" class="mini" type="button">All off</button></div>
-      <label class="sw"><input type="checkbox" id="eyesOn"><span class="lbl">Eyes</span><input type="color" id="eyeColor" value="#3ec8ff" aria-label="Eye colour"><span class="lbl2">Glow</span><input type="range" id="eyeGlow" min="0" max="1" step="0.05" value="0.7"></label>
-      <label class="sw"><input type="checkbox" id="hairOn"><span class="lbl">Hair</span><input type="color" id="hairColor" value="#f2f4f8" aria-label="Hair colour"></label>
+      <div class="sw"><label class="sw-tog"><input type="checkbox" id="eyesOn"><span class="lbl">Eyes</span></label><input type="color" id="eyeColor" value="#3ec8ff" aria-label="Eye colour"><span class="lbl2">Glow</span><input type="range" id="eyeGlow" aria-label="Eye glow" min="0" max="1" step="0.05" value="0.7"></div>
+      <div class="sw"><label class="sw-tog"><input type="checkbox" id="hairOn"><span class="lbl">Hair</span></label><input type="color" id="hairColor" value="#f2f4f8" aria-label="Hair colour"></div>
       <div class="hint" id="faceHint"></div>
       <p class="note">Runs extra tracking on top of the hands, so it costs frame rate (hair most). Models download the first time you switch one on.</p>
     </div>
@@ -88,9 +103,9 @@
     <h2>Audio</h2>
     <label class="sw"><span class="lbl">Master</span><input type="range" id="vol" min="0" max="100" value="70"></label>
     <label class="sw"><input type="checkbox" id="mute"> Mute all sound</label>
-    <label class="sw"><input type="checkbox" id="music" checked><span class="lbl">Music</span><input type="range" id="musicVol" min="0" max="100" value="45"></label>
-    <label class="sw"><input type="checkbox" id="sfx" checked><span class="lbl">Effects</span><input type="range" id="sfxVol" min="0" max="100" value="85"></label>
-    <label class="sw"><input type="checkbox" id="voice" checked><span class="lbl">Voice</span><input type="range" id="voiceVol" min="0" max="100" value="90"></label>
+    <div class="sw"><label class="sw-tog"><input type="checkbox" id="music" checked><span class="lbl">Music</span></label><input type="range" id="musicVol" aria-label="Music level" min="0" max="100" value="45"></div>
+    <div class="sw"><label class="sw-tog"><input type="checkbox" id="sfx" checked><span class="lbl">Effects</span></label><input type="range" id="sfxVol" aria-label="Effects level" min="0" max="100" value="85"></div>
+    <div class="sw"><label class="sw-tog"><input type="checkbox" id="voice" checked><span class="lbl">Voice</span></label><input type="range" id="voiceVol" aria-label="Voice level" min="0" max="100" value="90"></div>
     <div class="sw voice-row"><span class="lbl">Speaker</span><select id="voiceSel" aria-label="Japanese voice"></select><button id="voiceTest" class="mini" type="button">Test</button></div>
     <div class="hint" id="voiceHint"></div>
     <h2>Visuals &amp; tracking</h2>
@@ -109,7 +124,7 @@
   </aside>
 </div>
 
-<audio id="bgm" loop preload="auto" src="bgm.mp3"></audio>
+<audio id="bgm" loop preload="none" src="bgm.mp3"></audio>
 <script type="module" src="main.js"></script>
 </body>
 </html>

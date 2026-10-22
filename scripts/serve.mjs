@@ -16,7 +16,8 @@ const TYPES = {
 
 createServer(async (req, res) => {
   try {
-    let path = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname));
+    // like GitHub Pages: the site also answers under /track-lab/ (pages using <base href="/track-lab/"> work locally)
+    let path = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/^\/track-lab(?=\/|$)/, '') || '/');
     let file = join(ROOT, path);
     if (!file.startsWith(ROOT)) { res.writeHead(403).end(); return; }
     const s = await stat(file).catch(() => null);
@@ -38,6 +39,9 @@ createServer(async (req, res) => {
     res.writeHead(200, { ...headers, 'Content-Length': body.length });
     res.end(body);
   } catch {
-    res.writeHead(404, { 'Content-Type': 'text/plain' }).end('Not found');
+    // like GitHub Pages: missing pages get the custom 404 page, with a 404 status
+    const page = await readFile(join(ROOT, '404.html')).catch(() => null);
+    if (page) res.writeHead(404, { 'Content-Type': TYPES['.html'], 'Cache-Control': 'no-store' }).end(page);
+    else res.writeHead(404, { 'Content-Type': 'text/plain' }).end('Not found');
   }
 }).listen(PORT, () => console.log(`Track Lab → http://localhost:${PORT}/`));

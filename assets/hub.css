@@ -1,7 +1,7 @@
 :root {
   color-scheme: dark;
   --bg:#07080b; --bg2:#0d0f14; --line:rgba(232,230,225,.09); --line2:rgba(232,230,225,.18);
-  --fg:#e8e6e1; --muted:#8a8e96; --dim:#555a63; --accent:#d6ff3d;
+  --fg:#e8e6e1; --muted:#8a8e96; --dim:#767b84; --accent:#d6ff3d;
   --display:"Oswald","Arial Narrow",sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace; --body:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
   --gutter:clamp(16px, 4vw, 56px);
 }
@@ -70,6 +70,7 @@ footer { display:flex; flex-wrap:wrap; justify-content:space-between; gap:12px; 
   font-family:var(--mono); font-size:11px; color:var(--dim); }
 footer a { color:var(--muted); text-decoration:none; }
 footer a:hover { color:var(--fg); }
+footer > span:first-child a { text-decoration:underline; text-decoration-color:var(--line2); text-underline-offset:3px; }   /* a link inside a sentence needs more than colour */
 
 @media (max-width:600px) {
   .readout { display:none; }
@@ -82,3 +83,4 @@ footer a:hover { color:var(--fg); }
 
 /* brand mark, top-left of the hero (the readout sits top-right) */
 .hero-mark { position:absolute; z-index:1; top:calc(24px + env(safe-area-inset-top,0px)); left:var(--gutter); width:40px; height:40px; }
+.foot-links { display:flex; gap:20px; }

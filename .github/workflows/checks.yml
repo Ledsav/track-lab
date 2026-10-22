@@ -1,0 +1,61 @@
+name: Checks
+
+# Quality gates on every push and pull request. The site still deploys from pages.yml;
+# these tell you (red X / green tick on the commit) whether something broke.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  code:
+    name: JS syntax + HTML validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: JavaScript parses
+        run: for f in $(git ls-files '*.js' '*.mjs'); do node --check "$f" || exit 1; done
+      - name: HTML is valid
+        run: npx --yes html-validate@8.24.1 $(git ls-files '*.html')
+
+  links:
+    name: No broken links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Serve the site like GitHub Pages does (under /track-lab/)
+        run: node scripts/serve.mjs 8080 &
+      - name: Crawl every page and follow every link
+        run: |
+          sleep 1
+          # the hub draws its cards with JS, so hand the crawler every page from the registry.
+          # The live domain is skipped: canonical and og:image point there before this commit is deployed.
+          # ai.google.dev refuses bots.
+          npx --yes linkinator@6.1.2 $(node scripts/sitemap.mjs --list http://localhost:8080/track-lab/) \
+            http://localhost:8080/track-lab/404.html --recurse \
+            --skip "fonts.googleapis.com" --skip "fonts.gstatic.com" --skip "www.albertovaldesrey.com" --skip "ai.google.dev" \
+            --skip "localhost:8080/track-lab/experiences/_template" --retry --timeout 20000
+
+  lighthouse:
+    name: Lighthouse (accessibility, best practices, SEO, performance)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Audit every page
+        run: npx --yes @lhci/cli@0.14.0 autorun
+      - name: Keep the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-reports
+          path: .lighthouseci/

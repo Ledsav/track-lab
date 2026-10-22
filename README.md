@@ -8,7 +8,7 @@ Video never leaves your device: tracking runs locally with [MediaPipe](https://a
 | # | Experience | Tracks | What it does |
 |---|---|---|---|
 | 01 | [Cursed Hands](experiences/cursed-hands/) | hands + face | Jujutsu Kaisen hand seals with Japanese voice lines, an exorcism wave mode, and Gojo face filters (eyes, hair) |
-| 02 | [Frame It](experiences/frame-it/) | hands | An instant camera made of your fingers: frame the world to see it through five lenses, pinch to print a polaroid |
+| 02 | [Frame It](experiences/frame-it/) | hands | An instant camera made of your fingers: hold your hands like a camera to see the world through five lenses, press a finger like a shutter to print a polaroid |
 
 ## Structure
 

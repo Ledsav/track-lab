@@ -23,7 +23,7 @@ export const experiences = [
   {
     slug: 'frame-it',
     title: 'Frame It',
-    blurb: 'An instant camera made of your fingers. Frame the world with both hands to see it through another lens, then pinch to print a polaroid.',
+    blurb: 'An instant camera made of your fingers. Hold your hands like a camera to see the world through another lens, then press a finger like a shutter to print a polaroid.',
     tracker: 'hands',
     tags: ['camera', 'gestures', 'polaroid', 'lenses'],
     cover: { glyph: '◰', colors: ['#e8a33a', '#d2402a', '#2b2622'], logo: 'brand/frame-it/mark.svg' },

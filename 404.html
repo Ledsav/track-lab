@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- served for any missing URL under /track-lab/, at any depth: resolve every link from the lab root -->
+<base href="/track-lab/">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#07080b">
+<title>Lost tracking – Track Lab</title>
+<link rel="icon" href="assets/icons/favicon.ico" sizes="48x48">
+<link rel="icon" href="brand/track-lab/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/hub.css">
+<style>
+  .lost { position:relative; min-height:100vh; min-height:100dvh; display:flex; align-items:center; padding:48px var(--gutter); overflow:hidden; }
+  .lost canvas { position:absolute; inset:0; width:100%; height:100%; }
+  .lost-inner { position:relative; z-index:1; max-width:560px; }
+  .lost h1 { font-size:clamp(96px, 22vw, 220px); }
+  .lost .lede { max-width:34ch; }
+  .lost .go-home { display:inline-flex; align-items:center; gap:10px; margin-top:28px; padding:13px 20px; border:1px solid var(--line2); color:var(--fg); text-decoration:none;
+    font-family:var(--mono); font-size:12px; letter-spacing:.12em; text-transform:uppercase; transition:border-color .2s, color .2s; }
+  .lost .go-home:hover, .lost .go-home:focus-visible { border-color:var(--accent); color:var(--accent); outline:none; }
+  .lost ul { list-style:none; margin:26px 0 0; padding:0; display:flex; flex-wrap:wrap; gap:8px; }
+  .lost li a { display:inline-block; padding:6px 10px; border:1px solid var(--line); color:var(--muted); text-decoration:none; font-family:var(--mono); font-size:11px; }
+  .lost li a:hover, .lost li a:focus-visible { color:var(--fg); border-color:var(--line2); outline:none; }
+  .lost .hero-mark { position:absolute; }
+</style>
+</head>
+<body>
+<main class="lost">
+  <canvas id="searchCanvas" aria-hidden="true"></canvas>
+  <a href="./" aria-label="Track Lab home"><img class="hero-mark" src="brand/track-lab/mark.svg" alt=""></a>
+  <div class="lost-inner">
+    <p class="kicker"><span class="dot"></span>No hand detected</p>
+    <h1>404</h1>
+    <p class="lede">This page isn't in the lab. The tracker searched the whole frame and found nothing here.</p>
+    <a class="go-home" href="./">Back to the lab</a>
+    <ul id="exps"></ul>
+  </div>
+</main>
+<script type="module">
+  import { experiences } from './experiences/registry.js';
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
+  document.getElementById('exps').innerHTML = experiences.map(e => `<li><a href="experiences/${esc(e.slug)}/">${esc(e.title)}</a></li>`).join('');
+
+  // a detection box sweeping the frame, never locking on
+  const cv = document.getElementById('searchCanvas'), ctx = cv.getContext('2d');
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let W, H, dpr, t = 0, last = performance.now();
+  const resize = () => { dpr = Math.min(2, devicePixelRatio || 1); W = cv.clientWidth; H = cv.clientHeight; cv.width = W*dpr; cv.height = H*dpr; };
+  function draw(now) {
+    t += Math.min(.05, (now - last)/1000); last = now;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(232,230,225,.035)'; ctx.lineWidth = 1; ctx.beginPath();
+    for (let x = (W % 48)/2; x < W; x += 48) { ctx.moveTo(x + .5, 0); ctx.lineTo(x + .5, H); }
+    for (let y = (H % 48)/2; y < H; y += 48) { ctx.moveTo(0, y + .5); ctx.lineTo(W, y + .5); }
+    ctx.stroke();
+    const s = Math.min(W, H)*.22, cx = W*(.66 + .2*Math.sin(t*.5)), cy = H*(.5 + .28*Math.sin(t*.37 + 1)), L = s*.22;
+    ctx.strokeStyle = `rgba(232,230,225,${.35 + .25*Math.sin(t*6)})`; ctx.lineWidth = 1.5; ctx.beginPath();
+    [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([sx, sy]) => { const x = cx + sx*s/2, y = cy + sy*s/2; ctx.moveTo(x - sx*L, y); ctx.lineTo(x, y); ctx.lineTo(x, y - sy*L); });
+    ctx.stroke();
+    ctx.font = '500 10.5px "JetBrains Mono", ui-monospace, monospace'; ctx.fillStyle = 'rgba(232,230,225,.55)';
+    ctx.fillText(`SEARCHING${'.'.repeat(1 + Math.floor(t*2) % 3)}`, cx - s/2, cy - s/2 - 8);
+    ctx.fillStyle = 'rgba(214,255,61,.8)'; ctx.fillText('conf 0.00', cx - s/2, cy + s/2 + 16);
+    if (!still) requestAnimationFrame(draw);
+  }
+  resize(); addEventListener('resize', resize); requestAnimationFrame(draw);
+</script>
+</body>
+</html>
