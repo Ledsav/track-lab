@@ -85,3 +85,19 @@ A hidden pane does not fire `requestVideoFrameCallback`, so the tracker loop won
 call it directly to prove it works next to other models: `app.tracking.tracker.detectForVideo(video, performance.now())`.
 Then read the console for errors *and* `read_network_requests` for 404s. Console logs persist across
 reloads in the pane, so check timestamps before blaming the current load.
+
+## 6. Gesture timing tests: use a virtual clock
+
+Gesture detectors work on time windows (e.g. "both pinches within 380 ms"). The pane can throttle
+timers to ~400 ms per tick, so feeding synthetic hands with `setTimeout` between frames breaks those
+windows. Drive frames on a virtual clock instead, and keep the real tracker from overwriting your hands:
+
+```js
+const frame = app.frame; app.frame = () => {};                    // stop the app's own rAF loop
+app.tracking.tracker.detectForVideo = () => ({ landmarks:window.currentHands || [], worldLandmarks:[], handedness:[] });
+let vt = performance.now() + 10000;
+const step = hands => { vt += 33; window.currentHands = hands; app.pending = { res:{ multiHandLandmarks:hands }, t:vt }; frame(vt); };
+```
+
+Build synthetic hands as 21 landmarks in mirrored screen space (`x = 1 - px/W`). Test each gesture's
+false positives as hard as its true positives: hands dropping, fingers flickering, off-centre poses.

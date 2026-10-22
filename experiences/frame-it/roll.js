@@ -8,6 +8,9 @@
 import { $ } from '../../shared/js/dom.js';
 
 const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+/** iPhone / iPad (iPadOS reports as a Mac with touch). Safari there opens downloaded images instead of saving them. */
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const fileOf = photo => new File([photo.blob], fileName(photo), { type:photo.blob.type });
 
 export class Roll {
   /** sound: { shot(name) }, max: photos kept */
@@ -15,7 +18,7 @@ export class Roll {
     this.sound = sound; this.max = max; this.photos = []; this.current = null; this.queue = Promise.resolve();
     this.strip = $('roll'); this.viewer = $('viewer'); this.viewerImg = $('viewerImg');
     $('vClose').addEventListener('click', () => this.close());
-    $('vSave').addEventListener('click', () => this.current && this.print(this.current));
+    $('vSave').addEventListener('click', () => this.current && this.save(this.current));
     $('vShare').addEventListener('click', () => this.current && this.share(this.current));
     $('vDelete').addEventListener('click', () => this.current && this.remove(this.current));
     this.viewer.addEventListener('click', e => { if (e.target === this.viewer) this.close(); });
@@ -25,6 +28,7 @@ export class Roll {
 
   /** photo = { url (data URL), getBlob(), caption, time }. from = client rect the photo flies in from. */
   add(photo, from) {
+    photo.blob = null; photo.getBlob().then(b => { photo.blob = b; });   // ready before anyone taps Share / Save
     this.photos.unshift(photo);
     const el = document.createElement('button');
     el.className = 'pol'; el.type = 'button'; el.title = `${photo.caption}: open`;
@@ -61,8 +65,21 @@ export class Roll {
   }
   remove(photo) { this.close(); this.drop(photo); }
 
+  /**
+   * Save: on iPhone, open the share sheet ("Save Image") straight from the tap (it needs the tap's
+   * user activation, so the file is already built) while the print plays; elsewhere, print then download.
+   */
+  save(photo) {
+    if (isIOS() && photo.blob && navigator.canShare && navigator.canShare({ files:[fileOf(photo)] })) {
+      navigator.share({ files:[fileOf(photo)], title:'Frame It' }).catch(() => {});
+      return this.print(photo, { download:false });
+    }
+    return this.print(photo);
+  }
+
   async share(photo) {
-    const blob = await photo.getBlob(), file = new File([blob], fileName(photo), { type:blob.type });
+    if (!photo.blob) photo.blob = await photo.getBlob();
+    const file = fileOf(photo);
     try {
       if (navigator.canShare && navigator.canShare({ files:[file] })) await navigator.share({ files:[file], title:'Frame It' });
       else this.print(photo);
@@ -70,12 +87,12 @@ export class Roll {
   }
 
   /** Eject, develop, download. Queued so prints never overlap. */
-  print(photo) {
+  print(photo, opts = {}) {
     this.close();
-    this.queue = this.queue.then(() => this.runPrint(photo));
+    this.queue = this.queue.then(() => this.runPrint(photo, opts));
     return this.queue;
   }
-  async runPrint(photo) {
+  async runPrint(photo, { download:dl = true } = {}) {
     const printer = $('printer'), print = $('print'), img = $('printImg'), quick = reduced();
     img.src = photo.url; img.classList.remove('developed');
     printer.classList.add('on'); print.getAnimations().forEach(a => a.cancel());
@@ -87,7 +104,7 @@ export class Roll {
     await done(eject, quick ? 300 : 1500);
     img.classList.add('developed');                                         // CSS transition: grey-blue → full colour
     await wait(quick ? 200 : 2300);
-    download(photo);
+    if (dl) download(photo);
     this.sound.shot('done');
     await wait(900);
     const out = print.animate([{ transform:'translateY(0)', opacity:1 }, { transform:'translateY(14px) rotate(2deg)', opacity:0 }], { duration:350, easing:'ease-in', fill:'forwards' });

@@ -30,6 +30,11 @@ export function capturePhoto(img, quad, size = 640) {
   const c = { x:(TL.x + TR.x + BR.x + BL.x)/4, y:(TL.y + TR.y + BR.y + BL.y)/4 };
   let u = { x:(TR.x - TL.x + BR.x - BL.x)/2, y:(TR.y - TL.y + BR.y - BL.y)/2 };   // frame's "across" edge
   let v = { x:(BL.x - TL.x + BR.x - TR.x)/2, y:(BL.y - TL.y + BR.y - TR.y)/2 };   // frame's "down" edge
+  // keep the photo upright whatever corner the list starts at: "across" is the more horizontal edge, pointing right,
+  // "down" points down (otherwise a frame tilted near 45° could come out rotated 90°)
+  if (Math.abs(v.x) > Math.abs(u.x)) [u, v] = [v, u];
+  if (u.x < 0) u = { x:-u.x, y:-u.y };
+  if (v.y < 0) v = { x:-v.x, y:-v.y };
   const lu = Math.hypot(u.x, u.y) || 1, lv = Math.hypot(v.x, v.y) || 1, side = Math.min(lu, lv);
   u = { x:u.x*side/lu, y:u.y*side/lu }; v = { x:v.x*side/lv, y:v.y*side/lv };
   const o = { x:c.x - (u.x + v.x)/2, y:c.y - (u.y + v.y)/2 }, det = u.x*v.y - u.y*v.x || 1;

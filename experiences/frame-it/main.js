@@ -35,10 +35,13 @@ const CONFIG = {
     graceMs:180,               // the lens stays open this long after the frame is lost
     minArea:.01,               // smallest frame, as a share of the screen
     snapWindowMs:380,          // both pinches must land within this window
-    snapAfterFrameMs:600,      // …and within this long of a real frame
+    pinchFromFrameMs:150,      // a pinch only counts if it starts while the frame is up (or this soon after)
     snapLagMs:160,             // photo uses the frame from this long before the pinch (fingers were still open)
     historyMs:900,
-    clickMaxMs:650, clickCooldownMs:450,
+    stillSpeed:2.2,            // hand speed (hand-lengths / s) above which hands are "moving away": no snaps, no clicks
+    clickMinMs:90, clickMaxMs:650,   // how long the middle finger stays straight in a flick
+    clickSteadyMs:400,         // the frame must have been up this long before a flick counts
+    clickCooldownMs:700,
   },
   lens:  { width:480, photoWidth:1100, boot:.4, switch:.32 },
   photo: { size:640, roll:12, cooldown:.7 },
@@ -140,7 +143,7 @@ function frameQuad(a, b) {
 /* ============================== 4. FRAME ============================== */
 /** The lens: the director's frame between two L hands, smoothed, with a short history for snaps. */
 class FrameTracker {
-  constructor() { this.open = false; this.count = 0; this.lastSeen = -1e9; this.quad = null; this.history = []; }
+  constructor() { this.open = false; this.openSince = 0; this.count = 0; this.lastSeen = -1e9; this.quad = null; this.history = []; }
   update(hands, t, W, H) {
     const G = CONFIG.gesture, Ls = hands.filter(h => h.L);
     let q = null;
@@ -149,9 +152,19 @@ class FrameTracker {
       if (quadArea(q)/(W*H) < G.minArea) q = null;
     }
     if (q) {
-      if (this.quad && this.open) q = q.map((p, i) => ({ x:lerp(this.quad[i].x, p.x, G.smooth), y:lerp(this.quad[i].y, p.y, G.smooth) }));
+      if (this.quad && this.open) {
+        // smooth each corner toward the *nearest* old corner, not the same list slot: list order
+        // starts at the top-left-most corner, which changes hands when the frame tilts past ~45°
+        const used = new Set();
+        q = q.map(p => {
+          let best = 0, bd = Infinity;
+          this.quad.forEach((o, i) => { const d = (o.x - p.x)**2 + (o.y - p.y)**2; if (!used.has(i) && d < bd) { bd = d; best = i; } });
+          used.add(best); const o = this.quad[best];
+          return { x:lerp(o.x, p.x, G.smooth), y:lerp(o.y, p.y, G.smooth) };
+        });
+      }
       this.quad = q; this.lastSeen = t; this.count++;
-      if (this.count >= G.openFrames) this.open = true;
+      if (this.count >= G.openFrames && !this.open) { this.open = true; this.openSince = t; }
       this.history.push({ t, quad:q.map(p => ({ ...p })) });
     } else {
       this.count = 0;
@@ -159,6 +172,8 @@ class FrameTracker {
     }
     while (this.history.length && t - this.history[0].t > G.historyMs) this.history.shift();
   }
+  /** Up right now (not just coasting on the grace period) and for at least ms. */
+  steady(t, ms) { return this.open && t - this.lastSeen < 80 && t - this.openSince >= ms; }
   /** The frame as it was `lag` ms before t (the fingers were still open), or null. */
   quadBefore(t, lag) {
     let best = null;
@@ -167,32 +182,71 @@ class FrameTracker {
   }
 }
 
-/** Snap = both hands pinch within a short window, right after a real frame. Hands are told apart by screen side. */
+/**
+ * Which hand is which: with two hands, the left one of the pair is side 0 and the right one side 1,
+ * wherever they are on screen (a small frame off to one side has both hands in the same screen half).
+ * With one hand, fall back to the screen half it's in.
+ */
+function sided(hands, W) {
+  if (hands.length >= 2) { const [a, b] = [...hands].sort((x, y) => x.center.x - y.center.x); return [a, b]; }
+  const out = [null, null]; for (const h of hands) out[h.center.x < W/2 ? 0 : 1] = h; return out;
+}
+
+/** Hand speed per side, in hand-lengths per second (smoothed). Fast = the hands are going somewhere, not posing. */
+class Motion {
+  constructor() { this.prev = [null, null]; this.speed = [0, 0]; }
+  update(sides, t) {
+    sides.forEach((h, s) => {
+      const p = this.prev[s];
+      if (h && p && t > p.t) this.speed[s] = this.speed[s]*.5 + .5*(dist(h.center, p.c)/h.size)/((t - p.t)/1000);
+      else if (!h) this.speed[s] = 0;
+      this.prev[s] = h ? { c:{ ...h.center }, t } : null;
+    });
+  }
+  still() { return Math.max(...this.speed) < CONFIG.gesture.stillSpeed; }
+}
+
+/**
+ * Snap = both hands pinch within a short window. Each pinch only counts if it starts while the frame is up
+ * and the hands are still, so curling your fingers while lowering your hands doesn't take a photo.
+ */
 class SnapDetector {
   constructor() { this.prev = [false, false]; this.at = [-1e9, -1e9]; this.lastSnap = -1e9; }
-  update(hands, t, W, frame) {
-    const G = CONFIG.gesture, now = [false, false];
-    for (const h of hands) { const s = h.center.x < W/2 ? 0 : 1; now[s] = now[s] || h.pinch; }
-    for (const s of [0, 1]) { if (now[s] && !this.prev[s]) this.at[s] = t; this.prev[s] = now[s]; }
-    const both = Math.abs(this.at[0] - this.at[1]) < G.snapWindowMs && Math.max(...this.at) === t;
-    if (both && t - frame.lastSeen < G.snapAfterFrameMs && t - this.lastSnap > 600) { this.lastSnap = t; this.at = [-1e9, -1e9]; return true; }
+  update(sides, t, frame, motion) {
+    const G = CONFIG.gesture;
+    for (const s of [0, 1]) {
+      const now = !!(sides[s] && sides[s].pinch);
+      if (now && !this.prev[s]) this.at[s] = (t - frame.lastSeen < G.pinchFromFrameMs && motion.still()) ? t : -1e9;
+      if (!now) this.at[s] = -1e9;                                          // let go: that pinch no longer counts
+      this.prev[s] = now;
+    }
+    const both = this.at[0] > 0 && this.at[1] > 0 && Math.abs(this.at[0] - this.at[1]) < G.snapWindowMs && Math.max(...this.at) === t;
+    if (both && motion.still() && t - this.lastSnap > 600) { this.lastSnap = t; this.at = [-1e9, -1e9]; return true; }
     return false;
   }
 }
 
-/** Middle-finger click (straighten then curl again, quickly) while framing. Returns -1 (left hand), 1 (right) or 0. */
+/**
+ * Middle-finger flick (straighten, then curl again) while holding a steady frame.
+ * Returns -1 (left hand: previous lens), 1 (right hand: next lens) or 0.
+ * A finger that hovers half-out flickers between states: each change needs two readings in a row,
+ * the straight phase must last clickMinMs–clickMaxMs, and the frame must be up and still.
+ */
 class ClickDetector {
   constructor() { this.state = [false, false]; this.stable = [0, 0]; this.upAt = [-1e9, -1e9]; this.last = -1e9; }
-  update(hands, t, W, frameOpen) {
+  update(sides, t, frame, motion) {
     const G = CONFIG.gesture; let click = 0;
     for (const s of [0, 1]) {
-      const h = hands.find(x => (x.center.x < W/2 ? 0 : 1) === s);
-      if (!h) { this.stable[s] = 0; continue; }
+      const h = sides[s];
+      if (!h) { this.stable[s] = 0; this.upAt[s] = -1e9; continue; }
       if (h.middle === this.state[s]) { this.stable[s] = 0; continue; }
-      if (++this.stable[s] < 2) continue;                                   // two readings in a row: ignore flicker
+      if (++this.stable[s] < 2) continue;
       this.state[s] = h.middle; this.stable[s] = 0;
-      if (h.middle) this.upAt[s] = t;
-      else if (frameOpen && t - this.upAt[s] < G.clickMaxMs && t - this.last > G.clickCooldownMs) { this.last = t; click = s ? 1 : -1; }
+      if (h.middle) { this.upAt[s] = frame.steady(t, G.clickSteadyMs) ? t : -1e9; continue; }
+      const held = t - this.upAt[s];
+      if (this.upAt[s] > 0 && held >= G.clickMinMs && held <= G.clickMaxMs && frame.steady(t, G.clickSteadyMs)
+          && motion.still() && t - this.last > G.clickCooldownMs) { this.last = t; click = s ? 1 : -1; }
+      this.upAt[s] = -1e9;
     }
     return click;
   }
@@ -247,7 +301,7 @@ class App {
     this.sound = createSound(() => this.panel.levels());
     this.roll = new Roll({ sound:this.sound, max:CONFIG.photo.roll });
     this.lens = new LensView(CONFIG.lens.width); this.photoLens = new LensView(CONFIG.lens.photoWidth);
-    this.frameT = new FrameTracker(); this.snaps = new SnapDetector(); this.clicks = new ClickDetector();
+    this.frameT = new FrameTracker(); this.snaps = new SnapDetector(); this.clicks = new ClickDetector(); this.motion = new Motion();
     this.hands = []; this.pending = null; this.running = false; this.lastT = 0; this.t = 0;
     this.lensIdx = 0; this.openA = 0; this.bootT = 0; this.switchT = 0; this.shutterT = 0; this.flash = 0; this.cooldown = 0;
     this.exposures = 0; this.lastFramed = -1e9; this.wasOpen = false; this.drawQuad = null;
@@ -258,8 +312,10 @@ class App {
     $('prevLens').addEventListener('click', () => this.switchLens(-1));
     $('nextLens').addEventListener('click', () => this.switchLens(1));
     $('lensDots').addEventListener('click', e => { const i = e.target.dataset && e.target.dataset.i; if (i != null) this.switchLens(+i - this.lensIdx); });
+    // after a mouse/touch click, drop focus so the space bar goes back to taking photos (keyboard users keep focus)
+    document.querySelector('.dial').addEventListener('click', e => { if (e.detail > 0 && e.target.blur) e.target.blur(); });
     addEventListener('keydown', e => {
-      if (e.target.closest && e.target.closest('input, select, textarea')) return;
+      if (e.target.closest && e.target.closest('input, select, textarea, button, a')) return;   // they handle their own keys
       if (e.key === 'ArrowRight') this.switchLens(1);
       else if (e.key === 'ArrowLeft') this.switchLens(-1);
       else if (e.key === ' ' && this.running) { e.preventDefault(); this.snap(this.frameT.open ? this.frameT.quad : null); }
@@ -294,11 +350,12 @@ class App {
 
   ingest({ res, t }, W, H) {
     this.hands = (res.multiHandLandmarks || []).map(lm => readHand(lm, W, H));
-    const F = this.frameT;
+    const F = this.frameT, sides = sided(this.hands, W);
     F.update(this.hands, t, W, H);
-    const click = this.clicks.update(this.hands, t, W, F.open);
+    this.motion.update(sides, t);
+    const click = this.clicks.update(sides, t, F, this.motion);
     if (click) this.switchLens(click);
-    if (this.snaps.update(this.hands, t, W, F)) this.snap(F.quadBefore(t, CONFIG.gesture.snapLagMs));
+    if (this.snaps.update(sides, t, F, this.motion)) this.snap(F.quadBefore(t, CONFIG.gesture.snapLagMs));
     this.panel.setDebug(this.hands.map((h, i) => `H${i + 1} ${h.L ? 'L' : '·'} ${h.note}`).join('   ') || 'no hands');
   }
 
