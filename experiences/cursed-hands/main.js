@@ -27,8 +27,7 @@ import { FaceFX } from './face-fx.js';
 /* ============================== 1. CONFIG ============================== */
 const CONFIG = {
   tracker: {                   // camera size: shared default (1280×720, portrait on phones held upright)
-    options: { maxNumHands:2, modelComplexity:1, minDetectionConfidence:.6, minTrackingConfidence:.6 },
-    mobileComplexity:0,        // lighter model on phones / tablets
+    options: { maxNumHands:2, minDetectionConfidence:.6, minTrackingConfidence:.6 },
   },
   gesture: {
     extendRatio:1.12,          // tip must be this much farther from wrist than PIP to count as extended
@@ -1390,7 +1389,7 @@ class App {
     this.panel.setButton('Starting…', true); this.panel.setError('');
     try {
       if (document.fonts) { document.fonts.load(`800 40px ${SERIF}`, '無量空処領域展開蒼赫茈'); document.fonts.load(`500 20px ${LATIN}`, 'FLICK HOLD'); }
-      await startHands({ video:this.video, options:CONFIG.tracker.options, mobileComplexity:CONFIG.tracker.mobileComplexity,
+      this.tracking = await startHands({ video:this.video, options:CONFIG.tracker.options,
                          onResults:(res, t) => { this.pending = { res, t }; } });
       this.panel.showStage(); this.panel.setButton('Camera running', true);
       if (!this.running) { this.running = true; this.lastT = performance.now(); requestAnimationFrame(this.frame); }

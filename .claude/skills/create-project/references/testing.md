@@ -69,3 +69,19 @@ Read the JPEG from the scratchpad and actually look at it. Stop the sink when do
 ## 4. Clean up
 
 `localStorage.clear()` in the pane after testing settings, so test values don't linger.
+
+## 5. Test the real camera path too
+
+Driving the canvas directly skips camera start and the tracker runtime, which is where
+integration bugs live (e.g. two MediaPipe runtimes on one page aborting every frame).
+Hand the app a fake camera and use the real start button:
+
+```js
+navigator.mediaDevices.getUserMedia = async () => fakeCanvas.captureStream(30);
+await app.start();                       // real startHands(): camera + HandLandmarker
+```
+
+A hidden pane does not fire `requestVideoFrameCallback`, so the tracker loop won't run by itself;
+call it directly to prove it works next to other models: `app.tracking.tracker.detectForVideo(video, performance.now())`.
+Then read the console for errors *and* `read_network_requests` for 404s. Console logs persist across
+reloads in the pane, so check timestamps before blaming the current load.

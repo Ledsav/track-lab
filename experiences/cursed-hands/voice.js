@@ -5,7 +5,7 @@
      領域展開 … 無量空処      術式順転 … 蒼      術式反転 … 赫      虚式 … 茈
 
    Source per line, first that works:
-     1. a recorded clip at voice/<key>.mp3 (drop your own in, they get reverb + weight)
+     1. a recorded clip at voice/<key>.mp3, listed in voice/index.json (see voice/README.md)
      2. the browser's Japanese speech synthesis (Edge's neural voices sound best)
    Text is fed as kana so every engine reads it right.
    ============================================================================= */
@@ -52,11 +52,13 @@ export function createVoice({ sound, getLevel, getVoiceName }) {
     if (synth) { const u = new SpeechSynthesisUtterance(''); u.volume = 0; synth.speak(u); }
     if (clipsTried || !sound.ready) return;
     clipsTried = true;
-    await Promise.all(Object.keys(LINES).map(async key => {
+    let have = [];                                                   // voice/index.json lists the recorded keys, so absent clips cost no 404s
+    try { const r = await fetch('voice/index.json'); if (r.ok) have = await r.json(); } catch { /* no list: speech synthesis only */ }
+    await Promise.all(have.filter(key => LINES[key]).map(async key => {
       try {
         const r = await fetch(`voice/${key}.mp3`);
         if (r.ok) clips[key] = await sound.decode(await r.arrayBuffer());
-      } catch { /* no clip: speech synthesis covers it */ }
+      } catch { /* bad clip: speech synthesis covers it */ }
     }));
   }
 

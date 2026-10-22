@@ -12,8 +12,9 @@ experiences/<slug>/
 brand/<slug>/    logo marks (mark.svg, mark-mono.svg)
 ```
 
-No build step, no npm dependencies at runtime. CDN scripts only for the tracker (MediaPipe via
-jsDelivr, exact versions). Everything must work from `file`-less static hosting under `/track-lab/`,
+No build step, no npm dependencies at runtime. Tracking comes only from `shared/js/hands.js` and
+`shared/js/vision.js` (MediaPipe Tasks Vision via jsDelivr, exact version). Never add another MediaPipe
+build (e.g. the legacy `@mediapipe/hands` scripts): two runtimes on one page abort every frame. Everything must work from `file`-less static hosting under `/track-lab/`,
 so use relative URLs only (`../../shared/js/…`), never root-absolute ones.
 
 ## Code shape (see `experiences/cursed-hands/main.js`)
