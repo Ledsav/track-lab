@@ -31,6 +31,7 @@ track-lab/
 │   ├── js/math.js             clamp, lerp, ease, V3, seeded random, prune…
 │   ├── js/dom.js              $, device checks, loadScript, fullscreen
 │   └── css/experience.css     optional chrome: full-screen stage, start overlay, back link
+├── .claude/skills/create-project/   skill: brainstorm → build → test → logo → ship a new experience
 └── scripts/
     ├── serve.mjs              zero-dependency dev server
     └── new-experience.mjs     scaffolds an experience and registers it
