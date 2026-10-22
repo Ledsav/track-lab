@@ -7,7 +7,7 @@ Video never leaves your device: tracking runs locally with [MediaPipe](https://a
 
 | # | Experience | Tracks | What it does |
 |---|---|---|---|
-| 01 | [Cursed Hands](experiences/cursed-hands/) | hands | Jujutsu Kaisen hand seals with Japanese voice lines, plus an exorcism wave mode |
+| 01 | [Cursed Hands](experiences/cursed-hands/) | hands + face | Jujutsu Kaisen hand seals with Japanese voice lines, an exorcism wave mode, and Gojo face filters (eyes, hair) |
 
 ## Structure
 
@@ -25,9 +25,11 @@ track-lab/
 │       ├── main.js        techniques, effects, panel, app loop
 │       ├── curses.js      exorcism mode: curse designs + wave logic
 │       ├── voice.js       Japanese call-outs (recorded clips or speech synthesis)
+│       ├── face-fx.js     optional face filters: glowing recoloured eyes, dyed hair
 │       └── bgm.mp3
 ├── shared/
 │   ├── js/hands.js            MediaPipe Hands loader, camera start, skeleton / mirrored video drawing
+│   ├── js/vision.js           on-demand face landmarks (irises, lids) + hair/skin/clothes segmentation
 │   ├── js/math.js             clamp, lerp, ease, V3, seeded random, prune…
 │   ├── js/dom.js              $, device checks, loadScript, fullscreen
 │   └── css/experience.css     optional chrome: full-screen stage, start overlay, back link

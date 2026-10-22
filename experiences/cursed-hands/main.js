@@ -22,6 +22,7 @@ import { $, matches, isPhone, spacing, toggleFullscreen, canFullscreen } from '.
 import { startHands, drawSkeleton, drawMirroredVideo } from '../../shared/js/hands.js';
 import { CurseWaves } from './curses.js';
 import { createVoice, LINES } from './voice.js';
+import { FaceFX } from './face-fx.js';
 
 /* ============================== 1. CONFIG ============================== */
 const CONFIG = {
@@ -1223,7 +1224,10 @@ const TECHS = {
 
 /** Settings that survive a reload (per browser). Checkboxes store checked, everything else its value. */
 const SETTINGS_KEY = 'track-lab:cursed-hands:settings';
-const SAVED = ['vol','mute','music','musicVol','sfx','sfxVol','voice','voiceVol','reduce','fill','skel','swap','orbFloat','pinchThresh','flickSens'];
+const SAVED = ['vol','mute','music','musicVol','sfx','sfxVol','voice','voiceVol','reduce','fill','skel','swap','orbFloat','pinchThresh','flickSens',
+               'eyesOn','eyeColor','eyeGlow','hairOn','hairColor'];
+/** Face presets: Gojo = white hair + glowing blue Six Eyes. */
+const FACE_PRESETS = { gojo:{ eyesOn:true, eyeColor:'#3ec8ff', eyeGlow:'0.8', hairOn:true, hairColor:'#f2f4f8' }, off:{ eyesOn:false, hairOn:false } };
 
 class Panel {
   constructor(techs) {
@@ -1247,7 +1251,11 @@ class Panel {
       el.addEventListener('input', show); show();
     }
     for (const id of SAVED) $(id).addEventListener('change', () => this.save());
-    for (const id of ['vol','musicVol','sfxVol','voiceVol','orbFloat']) $(id).addEventListener('input', () => this.save());
+    for (const id of ['vol','musicVol','sfxVol','voiceVol','orbFloat','eyeColor','eyeGlow','hairColor']) $(id).addEventListener('input', () => this.save());
+    for (const [btn, key] of [['gojoBtn', 'gojo'], ['faceOffBtn', 'off']]) $(btn).addEventListener('click', () => {
+      for (const [id, v] of Object.entries(FACE_PRESETS[key])) { const el = $(id); if (el.type === 'checkbox') el.checked = v; else el.value = v; }
+      this.save();
+    });
     const syncFill = () => this.app.classList.toggle('fill', $('fill').checked);
     $('fill').addEventListener('change', syncFill); syncFill();
     this.button = $('start');
@@ -1286,7 +1294,8 @@ class Panel {
   togglePanel(force) { const open = force ?? !this.app.classList.contains('panel-open'); this.app.classList.toggle('panel-open', open); }
   controls() {
     return { swap:$('swap').checked, pinchDist:parseFloat($('pinchThresh').value), flickSens:parseFloat($('flickSens').value),
-             orbFloat:parseFloat($('orbFloat').value), reduce:$('reduce').checked, skeleton:$('skel').checked, fill:$('fill').checked };
+             orbFloat:parseFloat($('orbFloat').value), reduce:$('reduce').checked, skeleton:$('skel').checked, fill:$('fill').checked,
+             face:{ eyes:$('eyesOn').checked, eyeColor:$('eyeColor').value, glow:parseFloat($('eyeGlow').value), hair:$('hairOn').checked, hairColor:$('hairColor').value } };
   }
   master() { return $('mute').checked ? 0 : $('vol').value/100; }
   levels() {
@@ -1321,6 +1330,7 @@ class Panel {
       txt('oBest', g.newBest ? 'New best!' : `Best ${g.best.toLocaleString()}`);
     }
   }
+  setFaceHint(text) { const h = $('faceHint'); if (h.textContent !== text) h.textContent = text; }
   setBadge(text) { const b = $('badge'); if (b.textContent !== text) b.textContent = text; }
   setDebug(html) { $('debug').innerHTML = html; }
   setError(text) { $('err').textContent = text; }
@@ -1337,6 +1347,7 @@ class App {
     this.sound = createSound(() => this.panel.levels());
     this.music = new Music($('bgm'), this.sound);
     this.fx = new Effects();
+    this.faceFx = new FaceFX();
     this.voice = createVoice({ sound:this.sound, getLevel:() => this.panel.voiceLevel(), getVoiceName:() => this.panel.savedVoice });
     this.voice.onVoices(v => this.panel.setVoices(v, this.voice.current()));
 
@@ -1403,6 +1414,7 @@ class App {
 
     const input = { W, H, u, k:u/720, poses:this.poses.state, flicks:{ blue:false, red:false }, openFlick:null, orbFloat:this.ctl.orbFloat };
     if (this.pending) { this.ingest(this.pending, input); this.pending = null; }
+    this.faceFx.update(v, now, W, H, this.ctl.face);
 
     this.update(dt, input);
     this.render(W, H, u);
@@ -1447,6 +1459,7 @@ class App {
     // 0. backdrop: graded camera + the Domain (sampled later by the Blue lens / well)
     const b = this.bgCtx;
     Draw.video(b, this.video, W, H); Draw.grade(b, W, H);
+    this.faceFx.renderHair(b, W, H, this.ctl.face);        // dyed after the grade so the colour survives it
     this.domain.renderBackdrop(b, scene);
 
     const { ctx } = this;
@@ -1461,6 +1474,7 @@ class App {
     this.game.render(ctx);                                 // curses sit in the world, so the washes colour them too
     this.red.renderWash(ctx, W, H); this.blue.renderWash(ctx, W, H); this.purple.renderWash(ctx, W, H);
     this.fx.drawTint(ctx, W, H);
+    this.faceFx.renderEyes(ctx, this.ctl.face, Clock.t);  // glowing eyes sit above the washes
     this.purple.renderSpeedLines(ctx, W, H);
     this.fx.drawParticles(ctx);
 
@@ -1500,6 +1514,7 @@ class App {
     else if (domain.charge > 0) badge = '領域展開 Casting';
     panel.setBadge(badge);
     panel.setGame(this.game.hud());
+    panel.setFaceHint(this.faceFx.status(this.ctl.face));
 
     panel.setDebug(this.hands.length
       ? this.hands.map((h,i) => `H${i+1} ${h.isRight ? 'R' : 'L'}: <b style="color:${h.pose === 'purple' ? '#c7a8ff' : '#e8e6e1'}">${h.pose}</b> ${h.note}`).join('<br>')

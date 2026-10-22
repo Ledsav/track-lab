@@ -18,8 +18,9 @@ If `superpowers:brainstorming` is available, use it; otherwise ask at most five 
 message. Pin down:
 
 - **The fantasy**: one sentence. "You are Gojo", "you conduct an orchestra", "you are a puppeteer".
-- **Tracker**: hands / face / pose. Check `shared/js/` — only `hands.js` exists today. A new tracker
-  means adding `shared/js/<tracker>.js` first, mirroring `hands.js` (loader, `start<Tracker>()`, mirrored drawing helpers).
+- **Tracker**: hands / face / pose. Check `shared/js/`: `hands.js` (hand landmarks, drives the camera) and
+  `vision.js` (face landmarks with irises and eyelids, plus hair / skin / clothes segmentation, loaded on demand —
+  see `cursed-hands/face-fx.js` for how to use it). Pose would mean adding it to `vision.js` (PoseLandmarker).
 - **Core gestures**: 2–4 at most, each readable from 2D landmarks, each with a clear charge → release beat.
   Prefer gestures that don't fight each other (see the pose debouncing in `cursed-hands/main.js`, section 6).
 - **Feedback**: what the screen and speakers do the instant a gesture registers. Juice is the product.

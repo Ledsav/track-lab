@@ -67,6 +67,14 @@
       <p>Curses crawl out of the dark and come at you. Exorcise them before they reach the camera. Red knocks them back, Blue drags them into its well, Hollow Purple erases a whole line, Unlimited Void freezes everything for 5 s.</p>
       <div class="row"><button id="gameBtn">Start waves</button><span class="best">Best <b id="best">0</b></span></div>
     </div>
+    <h2>Face</h2>
+    <div class="face-box">
+      <div class="presets"><button id="gojoBtn" class="mini" type="button">Gojo · 白髪 六眼</button><button id="faceOffBtn" class="mini" type="button">All off</button></div>
+      <label class="sw"><input type="checkbox" id="eyesOn"><span class="lbl">Eyes</span><input type="color" id="eyeColor" value="#3ec8ff" aria-label="Eye colour"><span class="lbl2">Glow</span><input type="range" id="eyeGlow" min="0" max="1" step="0.05" value="0.7"></label>
+      <label class="sw"><input type="checkbox" id="hairOn"><span class="lbl">Hair</span><input type="color" id="hairColor" value="#f2f4f8" aria-label="Hair colour"></label>
+      <div class="hint" id="faceHint"></div>
+      <p class="note">Runs extra tracking on top of the hands, so it costs frame rate (hair most). Models download the first time you switch one on.</p>
+    </div>
     <h2>Techniques</h2>
     <div id="techs" style="display:flex;flex-direction:column;gap:9px"></div>
     <div class="tip"><b>Flick</b> — Blue / Red: snap your fingertip quickly toward the screen. Hollow Purple: load a finger-flick (index held against your thumb) and snap the index out. Fire once the ring passes the tick.</div>
