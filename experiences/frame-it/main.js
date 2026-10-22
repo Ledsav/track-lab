@@ -43,14 +43,19 @@ const CONFIG = {
     tiltSteadyMs:300,          // the frame must be up this long before tilting counts
   },
   lens:  { width:480, photoWidth:1100, boot:.4, switch:.32 },
+  music: {                     // CC0 lo-fi by TAD (see music/README.md), shuffled, looping through the list
+    tracks:['music/a-cup-of-tea.mp3', 'music/cat-caffe.mp3', 'music/morning-rain.mp3'],
+    fadeIn:2.5,                // seconds to fade in when the film loads
+    duck:{ shutter:[.55, .9], motor:[.5, 3.8] },   // [how much quieter, for how long (s)] under camera sounds
+  },
   photo: { size:640, roll:12, cooldown:.7 },
   shutter: .2,
 };
 
 /* ============================== 2. SOUND ============================== */
-/** getLevels() → { master, sfx }. Must be init() from a click. */
+/** getLevels() → { master, sfx, music }. Must be init() from a click. Music → duck → music bus → master. */
 function createSound(getLevels) {
-  let ac = null, master, sfx, noiseBuf, hum;
+  let ac = null, master, sfx, noiseBuf, hum, musicEl = null, musicBus, duckGain, order = [], track = 0;
   function init() {
     if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
@@ -66,11 +71,34 @@ function createSound(getLevels) {
     const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 500; lp.connect(hum);
     for (const [type, f, g] of [['sine', 98, .6], ['triangle', 196.5, .25]]) { const o = ac.createOscillator(), og = ac.createGain(); o.type = type; o.frequency.value = f; og.gain.value = g; o.connect(og); og.connect(lp); o.start(); }
   }
+  /** Start the playlist (shuffled, then round and round), fading in. Call from the same click as init(). */
+  function startMusic(tracks) {
+    if (!ac || musicEl) return;
+    order = [...tracks].sort(() => Math.random() - .5); track = 0;
+    musicEl = new Audio(); musicEl.preload = 'auto'; musicEl.src = order[0];
+    const src = ac.createMediaElementSource(musicEl);
+    duckGain = ac.createGain(); musicBus = ac.createGain(); musicBus.gain.value = 0;
+    src.connect(duckGain); duckGain.connect(musicBus); musicBus.connect(master);
+    musicEl.addEventListener('ended', () => { track = (track + 1) % order.length; musicEl.src = order[track]; musicEl.play().catch(() => {}); });
+    musicBus.gain.setTargetAtTime(getLevels().music, ac.currentTime, CONFIG.music.fadeIn/3);
+    if (getLevels().music > 0) musicEl.play().catch(() => {});
+  }
+  /** Pull the music down by amount (0..1) for secs, then let it swell back. */
+  function duck(amount, secs) {
+    if (!duckGain) return;
+    const t = ac.currentTime; duckGain.gain.cancelScheduledValues(t);
+    duckGain.gain.setTargetAtTime(1 - amount, t, .04); duckGain.gain.setTargetAtTime(1, t + secs, .45);
+  }
   function update(open) {
     if (!ac) return;
     const t = ac.currentTime, v = getLevels();
     master.gain.setTargetAtTime(v.master, t, .05); sfx.gain.setTargetAtTime(v.sfx, t, .05);
     hum.gain.setTargetAtTime(.05*open, t, .12);
+    if (musicEl) {
+      if (t > CONFIG.music.fadeIn) musicBus.gain.setTargetAtTime(v.music, t, .25);
+      if (v.music > 0 && musicEl.paused) musicEl.play().catch(() => {});      // switched back on
+      else if (v.music === 0 && !musicEl.paused && musicBus.gain.value < .01) musicEl.pause();   // off: stop decoding once silent
+    }
   }
   function noise(dur, o = {}) {
     const { f0 = 2000, f1 = 200, q = 1, type = 'bandpass', gain = .5, attack = .003, delay = 0 } = o;
@@ -95,7 +123,11 @@ function createSound(getLevels) {
     motor:   () => { tone('sawtooth', 62, 66, 1.6, { gain:.06, attack:.05 }); noise(1.6, { f0:1100, f1:1300, q:4, gain:.12, attack:.06 }); for (let i = 0; i < 12; i++) noise(.02, { type:'highpass', f0:3200, f1:3000, gain:.08, delay:i*.12 }); },
     done:    () => { tone('sine', 1320, 1320, .12, { gain:.08 }); tone('sine', 1760, 1760, .14, { gain:.06, delay:.08 }); },
   };
-  return { init, update, shot:name => { if (ac && shots[name]) shots[name](); } };
+  return {
+    init, update, startMusic,
+    shot:name => { if (!ac || !shots[name]) return; shots[name](); const d = CONFIG.music.duck[name]; if (d) duck(...d); },
+    get music() { return musicEl ? { src:musicEl.src.split('/').pop(), paused:musicEl.paused, time:musicEl.currentTime, bus:musicBus.gain.value, duck:duckGain.gain.value } : null; },
+  };
 }
 
 /* ============================== 3. GESTURES ============================== */
@@ -254,7 +286,7 @@ class TiltDial {
 
 /* ============================== 5. PANEL ============================== */
 const SETTINGS_KEY = 'track-lab:frame-it:settings';
-const SAVED = ['vol', 'mute', 'sfxVol', 'grain', 'reduce', 'skel'];
+const SAVED = ['vol', 'mute', 'sfxVol', 'music', 'musicVol', 'grain', 'reduce', 'skel'];
 
 class Panel {
   constructor() {
@@ -276,7 +308,7 @@ class Panel {
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* private mode */ }
   }
   toggleSheet(force) { const on = force ?? !this.app.classList.contains('sheet-open'); this.app.classList.toggle('sheet-open', on); }
-  levels() { return { master:$('mute').checked ? 0 : $('vol').value/100, sfx:$('sfxVol').value/100 }; }
+  levels() { return { master:$('mute').checked ? 0 : $('vol').value/100, sfx:$('sfxVol').value/100, music:$('music').checked ? $('musicVol').value/100 : 0 }; }
   controls() { return { reduce:$('reduce').checked, skeleton:$('skel').checked }; }
   setLens(i) {
     const l = LENSES[i], name = $('lensName');
@@ -324,7 +356,7 @@ class App {
   }
 
   async start() {
-    this.sound.init();
+    this.sound.init(); this.sound.startMusic(CONFIG.music.tracks);
     $('start').disabled = true; $('start').textContent = 'Loading film…'; this.panel.setError('');
     try {
       if (document.fonts) { document.fonts.load('48px "Caveat"', 'Inverted'); document.fonts.load('16px "IBM Plex Mono"'); }

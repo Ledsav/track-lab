@@ -32,7 +32,8 @@ track-lab/
 │       ├── main.js        gestures (two-hand frame, tilt dial, one-hand pinch), frame tracking, render
 │       ├── lenses.js      Inverted, X-Ray, Thermal, Manga Ink, Prism
 │       ├── photo.js       straighten the frame into a photo, polaroid card
-│       └── roll.js        photo roll, viewer, polaroid printer
+│       ├── roll.js        photo roll, viewer, polaroid printer
+│       └── music/         CC0 lo-fi by TAD (sources in music/README.md)
 ├── shared/
 │   ├── js/hands.js            camera start + hand tracking (Tasks Vision), skeleton / mirrored video drawing
 │   ├── js/vision.js           on-demand face landmarks (irises, lids) + hair/skin/clothes segmentation
