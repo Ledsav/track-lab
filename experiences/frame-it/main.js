@@ -25,6 +25,7 @@ import { Roll } from './roll.js';
 /* ============================== 1. CONFIG ============================== */
 const CONFIG = {
   tracker: { options:{ maxNumHands:2, minDetectionConfidence:.6, minTrackingConfidence:.6 } },
+  view: { wholeBelow:.8 },    // show the whole camera picture when filling the screen would keep less than 80% of its shape
   gesture: {
     extendRatio:1.1,           // tip this much farther from the wrist than the PIP joint = finger extended
     thumbOut:.5,               // thumb tip ↔ index knuckle, × hand size: above = thumb stuck out
@@ -423,6 +424,7 @@ class App {
     const v = this.video; if (!v.videoWidth) return;
     const W = v.videoWidth, H = v.videoHeight;
     if (this.canvas.width !== W || this.canvas.height !== H) { this.canvas.width = W; this.canvas.height = H; }
+    this.fitCamera(W, H);
     const dt = clamp((now - this.lastT)/1000, .001, .05); this.lastT = now; this.t += dt;
     this.ctl = this.panel.controls();
     if (this.pending) { this.ingest(this.pending, W, H); this.pending = null; }
@@ -484,10 +486,23 @@ class App {
     this.roll.add({ url:card.toDataURL('image/jpeg', .92), getBlob:() => toBlob(card), caption:lens.name, time:Date.now() }, this.clientRect(quad));
   }
 
-  /** Canvas coords → the on-screen rect (the canvas is object-fit: cover). */
+  /** Fill the screen unless that would cut off much of the camera (a 3:4 phone camera on a tall phone loses ~40%
+      of its width): then show the whole picture, with the camera body around it. */
+  fitCamera(W, H) {
+    const r = this.canvas.getBoundingClientRect(), a = W/H, b = r.width/r.height;
+    const whole = r.width > 0 && Math.min(a, b) / Math.max(a, b) < CONFIG.view.wholeBelow;
+    const s = Math.min(r.width/W, r.height/H), bars = whole ? [(r.width - W*s)/2, (r.height - H*s)/2] : [0, 0];
+    if (whole !== this.whole || bars[0] !== this.bars?.[0] || bars[1] !== this.bars?.[1]) {
+      this.whole = whole; this.bars = bars; this.canvas.classList.toggle('whole', whole);
+      document.documentElement.style.setProperty('--bar-x', bars[0] + 'px');
+      document.documentElement.style.setProperty('--bar-y', bars[1] + 'px');
+    }
+  }
+
+  /** Canvas coords → the on-screen rect (object-fit: cover, or contain when the whole picture is shown). */
   clientRect(q) {
     const r = this.canvas.getBoundingClientRect(), W = this.canvas.width, H = this.canvas.height;
-    const s = Math.max(r.width/W, r.height/H), ox = r.left + (r.width - W*s)/2, oy = r.top + (r.height - H*s)/2;
+    const s = (this.whole ? Math.min : Math.max)(r.width/W, r.height/H), ox = r.left + (r.width - W*s)/2, oy = r.top + (r.height - H*s)/2;
     const xs = q.map(p => ox + p.x*s), ys = q.map(p => oy + p.y*s);
     const left = Math.min(...xs), top = Math.min(...ys);
     return { left, top, width:Math.max(...xs) - left, height:Math.max(...ys) - top };

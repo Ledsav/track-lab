@@ -26,7 +26,7 @@ import { FaceFX } from './face-fx.js';
 
 /* ============================== 1. CONFIG ============================== */
 const CONFIG = {
-  tracker: {                   // camera size: shared default (1280×720, portrait on phones held upright)
+  tracker: {                   // camera: shared default (1280×720 on laptops, the full sensor view on phones)
     options: { maxNumHands:2, minDetectionConfidence:.6, minTrackingConfidence:.6 },
   },
   gesture: {
