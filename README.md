@@ -3,7 +3,7 @@
 Motion-tracking experiences that run entirely in the browser. Point a camera at yourself and play.
 Video never leaves your device: tracking runs locally with [MediaPipe](https://ai.google.dev/edge/mediapipe).
 
-**Live:** https://ledsav.github.io/track-lab/
+**Live:** https://www.albertovaldesrey.com/track-lab/
 
 | # | Experience | Tracks | What it does |
 |---|---|---|---|
