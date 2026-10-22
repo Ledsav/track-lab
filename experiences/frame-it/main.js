@@ -254,9 +254,12 @@ class Motion {
  * - Only a dip in ONE hand counts: whatever both hands do together (moving, tilting the grip) is subtracted.
  * - A full press has to hold for pressHold readings, and the button must come back up before the next shot.
  * progress[side] (0..1) drives the ring; focus fires once at half-press. A full pinch is a deeper press.
+ * correct() puts a pressed fingertip's frame corner back where that fingertip rests, so pressing doesn't
+ * drag the frame down while it keeps following (moving, tilting) the hands.
  */
+const handAxes = h => { const ax = h.pts[5].x - h.pts[0].x, ay = h.pts[5].y - h.pts[0].y, l = Math.hypot(ax, ay) || 1; return { ux:ax/l, uy:ay/l, k:h.size }; };
 class SnapDetector {
-  constructor() { this.hist = [[], []]; this.lastL = [-1e9, -1e9]; this.progress = [0, 0]; this.held = [0, 0]; this.half = [0, 0]; this.latched = [false, false]; this.focused = [false, false]; this.lastSnap = -1e9; }
+  constructor() { this.rest = [null, null]; this.dipping = [false, false]; this.hist = [[], []]; this.lastL = [-1e9, -1e9]; this.progress = [0, 0]; this.held = [0, 0]; this.half = [0, 0]; this.latched = [false, false]; this.focused = [false, false]; this.lastSnap = -1e9; }
   base(s) { const h = this.hist[s]; if (h.length < 10) return 0; const x = [...h].sort((p, q) => p - q); return x[x.length >> 1]; }
   update(sides, t, frame, motion) {
     const G = CONFIG.gesture, armed = t - frame.lastOpen < G.snapArmMs;
@@ -265,8 +268,14 @@ class SnapDetector {
     const depth = [0, 1].map(s => { const h = sides[s], b = this.base(s); return h && b ? (b - h.gap)/b : 0; });
     for (const s of [0, 1]) {
       const h = sides[s];
-      if (!h) { this.hist[s].length = 0; this.progress[s] = this.held[s] = 0; this.latched[s] = this.focused[s] = false; continue; }
-      if (h.L && depth[s] < G.pressRelease) { this.hist[s].push(h.gap); if (this.hist[s].length > G.restWindow) this.hist[s].shift(); }   // at rest: feeds the baseline
+      if (!h) { this.hist[s].length = 0; this.progress[s] = this.held[s] = 0; this.latched[s] = this.focused[s] = this.dipping[s] = false; this.rest[s] = null; continue; }
+      this.dipping[s] = depth[s] >= G.pressRelease;
+      if (h.L && !this.dipping[s]) {                                                       // at rest: feeds the baseline and the resting fingertip spot
+        this.hist[s].push(h.gap); if (this.hist[s].length > G.restWindow) this.hist[s].shift();
+        const A = handAxes(h), dx = h.indexTip.x - h.thumbTip.x, dy = h.indexTip.y - h.thumbTip.y;
+        const loc = { a:(dx*A.ux + dy*A.uy)/A.k, b:(-dx*A.uy + dy*A.ux)/A.k }, r = this.rest[s];
+        this.rest[s] = r ? { a:r.a + (loc.a - r.a)*.3, b:r.b + (loc.b - r.b)*.3 } : loc;
+      }
       const press = depth[s] - Math.max(0, depth[1 - s]);                                  // this hand's dip, minus what both hands do together
       if (press < G.pressRelease) this.latched[s] = this.focused[s] = false;               // button up
       const framing = armed && t - this.lastL[1 - s] < G.otherLMs && this.base(s) > 0 && motion.still();   // re-gripping / moving: no ring, no beep
@@ -280,6 +289,21 @@ class SnapDetector {
     return { fire, focus };
   }
   get pinching() { return Math.max(...this.progress) > .05; }
+  /** The frame with any pressed fingertip's corner moved back to that fingertip's resting spot. */
+  correct(quad, sides) {
+    if (!quad) return quad;
+    const q = quad.map(p => ({ ...p }));
+    for (const s of [0, 1]) {
+      const h = sides[s], r = this.rest[s];
+      if (!h || !r || !this.dipping[s]) continue;
+      let best = -1, bd = h.size*.8;
+      q.forEach((p, i) => { const d = Math.hypot(p.x - h.indexTip.x, p.y - h.indexTip.y); if (d < bd) { bd = d; best = i; } });
+      if (best < 0) continue;
+      const A = handAxes(h);
+      q[best] = { x:h.thumbTip.x + (r.a*A.ux - r.b*A.uy)*A.k, y:h.thumbTip.y + (r.a*A.uy + r.b*A.ux)*A.k };
+    }
+    return q;
+  }
 }
 
 /** Frame tilt in degrees from its more-horizontal edge: 0 = level, + = clockwise on screen. */
@@ -298,10 +322,10 @@ function frameTilt(q) {
  */
 class TiltDial {
   constructor() { this.armed = false; this.angle = 0; this.wasOpen = false; }
-  update(frame, t) {
+  update(frame, t, quad = frame.quad) {
     const G = CONFIG.gesture;
-    if (!frame.open || !frame.quad) { this.wasOpen = false; return 0; }
-    const a = this.angle = frameTilt(frame.quad);
+    if (!frame.open || !quad) { this.wasOpen = false; return 0; }
+    const a = this.angle = frameTilt(quad);
     if (!this.wasOpen) { this.wasOpen = true; this.armed = Math.abs(a) < G.tiltTurn - 8; }
     if (Math.abs(a) < G.tiltLevel) { this.armed = true; return 0; }
     if (this.armed && t - frame.openSince > G.tiltSteadyMs && Math.abs(a) >= G.tiltTurn) { this.armed = false; return a > 0 ? 1 : -1; }
@@ -359,7 +383,7 @@ class App {
     this.roll = new Roll({ sound:this.sound, max:CONFIG.photo.roll });
     this.lens = new LensView(CONFIG.lens.width); this.photoLens = new LensView(CONFIG.lens.photoWidth);
     this.frameT = new FrameTracker(); this.snaps = new SnapDetector(); this.dial = new TiltDial(); this.motion = new Motion();
-    this.sides = [null, null]; this.holding = false; this.cleanQuad = null;
+    this.sides = [null, null]; this.holding = false; this.liveQuad = null;
     this.hands = []; this.pending = null; this.running = false; this.lastT = 0; this.t = 0;
     this.lensIdx = 0; this.openA = 0; this.bootT = 0; this.switchT = 0; this.shutterT = 0; this.flash = 0; this.cooldown = 0;
     this.exposures = 0; this.lastFramed = -1e9; this.wasOpen = false; this.drawQuad = null;
@@ -411,14 +435,13 @@ class App {
     const F = this.frameT, sides = this.sides = sided(this.hands, W);
     F.update(this.hands, t, W, H);
     this.motion.update(sides, t);
-    if (!this.snaps.pinching && F.open) this.cleanQuad = F.quad.map(p => ({ ...p }));   // the frame before any pinch moved a thumb
-    const turn = this.snaps.pinching ? 0 : this.dial.update(F, t);
-    if (turn) this.switchLens(turn);
     const shutter = this.snaps.update(sides, t, F, this.motion);
+    if (F.open) this.liveQuad = this.snaps.correct(F.quad, sides);       // follows the hands, minus any shutter press
+    const turn = this.dial.update(F, t, this.liveQuad);                    // the dial keeps working while you half-press
+    if (turn) this.switchLens(turn);
     if (shutter.focus) this.sound.shot('focus');
-    if (shutter.fire) this.snap(this.cleanQuad || F.quad);
-    // keep the lens up, and still, while a pinch closes, including the moment where the pinching hand
-    // has stopped being an L but the ring hasn't started yet (the other hand still holds its corner)
+    if (shutter.fire) this.snap(this.liveQuad || F.quad);
+    // keep the lens up through a deep press / pinch that briefly breaks the frame (the other hand still holds its corner)
     const cornerHeld = sides.some(h => h && h.L);
     this.holding = this.snaps.pinching || (!F.open && cornerHeld && t - F.lastOpen < 450);
     this.panel.setDebug(this.hands.map((h, i) => `H${i + 1} ${h.L ? 'L' : '·'} ${h.note}`).join('   ') || 'no hands');
@@ -429,7 +452,7 @@ class App {
     if (shown && !this.wasOpen) { this.bootT = CONFIG.lens.boot; this.sound.shot('boot'); }
     this.wasOpen = shown;
     if (F.open) this.lastFramed = this.t;
-    if (this.holding && this.cleanQuad) this.drawQuad = this.cleanQuad; else if (F.open) this.drawQuad = F.quad;
+    if (F.open && this.liveQuad) this.drawQuad = this.liveQuad;          // otherwise (held) keep the last frame drawn
     this.openA = clamp(this.openA + (shown ? dt/.12 : -dt/.18), 0, 1);
     for (const k of ['bootT', 'switchT', 'shutterT', 'cooldown']) this[k] = Math.max(0, this[k] - dt);
     this.flash = Math.max(0, this.flash - dt*4);
@@ -493,7 +516,7 @@ class App {
       if (this.shutterT > 0) this.blades(ctx, q);
       ctx.restore();
       this.brackets(ctx, q, u, boot, lens);
-      if (this.frameT.open && !this.holding) this.gauge(ctx, q, u);
+      if (this.frameT.open) this.gauge(ctx, q, u);
     }
     this.shutterRings(ctx, u);
 
