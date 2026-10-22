@@ -36,6 +36,7 @@ track-lab/
 ├── .claude/skills/create-project/   skill: brainstorm → build → test → logo → ship a new experience
 └── scripts/
     ├── serve.mjs              zero-dependency dev server
+    ├── stamp.mjs              cache-busting step used by the deploy workflow
     └── new-experience.mjs     scaffolds an experience and registers it
 ```
 
@@ -63,4 +64,6 @@ Each experience is a standalone page. Use whatever you want from `shared/`, or n
 
 ## Deploy
 
-GitHub Pages serves the `main` branch from the repository root. Push and it's live.
+Push to `main` and `.github/workflows/pages.yml` deploys it. On the way it runs `scripts/stamp.mjs`,
+which adds `?v=<commit>` to every local module / script / style URL, so a browser can never mix
+cached files from two deploys (Pages caches each file for 10 minutes). Source files stay unstamped.

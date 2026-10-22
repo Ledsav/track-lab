@@ -11,6 +11,13 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;600&family=Shippori+Mincho:wght@600;800&family=Yuji+Syuku&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<script>
+  // If a module fails to load or start, say so on the start screen instead of leaving a dead page.
+  addEventListener('error', e => {
+    const el = document.getElementById('err');
+    if (el && !el.textContent) el.textContent = 'Something failed to load (' + (e.message || 'script error') + '). Try a hard refresh: Ctrl+Shift+R (Cmd+Shift+R on Mac).';
+  });
+</script>
 </head>
 <body>
 <div class="app" id="app">

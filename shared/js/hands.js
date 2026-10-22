@@ -36,7 +36,8 @@ export async function startHands({ video, onResults, options = {}, size }) {
   const tracker = await createHandLandmarker({ numHands:o.maxNumHands, minHandDetectionConfidence:o.minDetectionConfidence,
                                                minHandPresenceConfidence:o.minDetectionConfidence, minTrackingConfidence:o.minTrackingConfidence });
   let stopped = false, lastFrame = -1;
-  const next = () => video.requestVideoFrameCallback ? video.requestVideoFrameCallback(tick) : requestAnimationFrame(tick);
+  // rAF, not requestVideoFrameCallback: that one may never fire for a display:none <video>
+  const next = () => requestAnimationFrame(tick);
   function tick() {
     if (stopped) return;
     if (video.readyState >= 2 && video.currentTime !== lastFrame) {      // only new camera frames
