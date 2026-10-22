@@ -2,13 +2,13 @@
    FRAME IT
    -----------------------------------------------------------------------------
    An instant camera made of your fingers. Two L-shaped hands make a director's frame;
-   inside it the world turns into another lens; a middle-finger click switches lens;
-   pinching both hands takes a polaroid.
+   inside it the world turns into another lens; tilting the frame like a dial switches
+   lens; pinching one hand (the other keeps its corner) takes a polaroid.
 
    1. Config       every tunable number in one place
    2. Sound        WebAudio synth: shutter, film advance, lens boot / switch, printer motor, lens hum
-   3. Gestures     landmarks → hand reading (L, pinch, middle finger)
-   4. Frame        four-fingertip quad with smoothing + history, snap and click detectors
+   3. Gestures     landmarks → hand reading (L, thumb–index gap)
+   4. Frame        director's-frame quad with smoothing, one-hand snap, tilt dial
    5. Panel        lens dial, viewfinder readouts, hint, settings sheet
    6. App          tracking, main loop, render order
 
@@ -19,7 +19,7 @@ import { clamp, lerp, ease, dist, mulberry } from '../../shared/js/math.js';
 import { $, isPhone, toggleFullscreen, canFullscreen } from '../../shared/js/dom.js';
 import { startHands, drawSkeleton, drawMirroredVideo, toMirrored } from '../../shared/js/hands.js';
 import { LENSES, LensView } from './lenses.js';
-import { orderQuad, quadArea, capturePhoto, makeCard, toBlob } from './photo.js';
+import { quadArea, capturePhoto, makeCard, toBlob } from './photo.js';
 import { Roll } from './roll.js';
 
 /* ============================== 1. CONFIG ============================== */
@@ -29,19 +29,18 @@ const CONFIG = {
     extendRatio:1.1,           // tip this much farther from the wrist than the PIP joint = finger extended
     thumbOut:.5,               // thumb tip ↔ index knuckle, × hand size: above = thumb stuck out
     lMinAngle:35,              // degrees between thumb and index for an L
-    pinch:.3,                  // thumb tip ↔ index tip, × hand size: below = pinched
+    pinch:.3,                  // thumb tip ↔ index tip, × hand size: below = pinched (fires the shutter)
+    pinchStart:.75,            // …the shutter ring starts filling when the gap drops below this
     smooth:.5,                 // frame corner smoothing (1 = raw)
     openFrames:3,              // consecutive frame readings before the lens opens
     graceMs:180,               // the lens stays open this long after the frame is lost
     minArea:.01,               // smallest frame, as a share of the screen
-    snapWindowMs:380,          // both pinches must land within this window
-    pinchFromFrameMs:150,      // a pinch only counts if it starts while the frame is up (or this soon after)
-    snapLagMs:160,             // photo uses the frame from this long before the pinch (fingers were still open)
-    historyMs:900,
-    stillSpeed:2.2,            // hand speed (hand-lengths / s) above which hands are "moving away": no snaps, no clicks
-    clickMinMs:90, clickMaxMs:650,   // how long the middle finger stays straight in a flick
-    clickSteadyMs:400,         // the frame must have been up this long before a flick counts
-    clickCooldownMs:700,
+    snapArmMs:1200,            // a pinch can fire this long after the frame was last whole (pinching breaks the L early)
+    otherLMs:350,              // …as long as the other hand still made its L this recently (it keeps its corner)
+    stillSpeed:2.2,            // hand speed (hand-lengths / s) above which hands are "moving away": no snaps
+    tiltTurn:22,               // degrees of frame tilt that turn the dial one lens (clockwise = next)
+    tiltLevel:10,              // back within this of level to arm the next turn
+    tiltSteadyMs:300,          // the frame must be up this long before tilting counts
   },
   lens:  { width:480, photoWidth:1100, boot:.4, switch:.32 },
   photo: { size:640, roll:12, cooldown:.7 },
@@ -101,49 +100,53 @@ function createSound(getLevels) {
 
 /* ============================== 3. GESTURES ============================== */
 /**
- * One hand → { pts, size, center, thumb, index, L, pinch, middle, note }.
+ * One hand → { pts, size, center, L, gap, thumbTip, indexTip, vtx, thumbDir, indexDir, note }.
  * L: index straight + thumb stuck out at an angle to it (the corner of a director's frame).
  */
 function readHand(lm, W, H) {
   const G = CONFIG.gesture, pts = toMirrored(lm, W, H), size = dist(pts[0], pts[9]) || 1;
   const ext = (tip, pip) => dist(pts[tip], pts[0]) > dist(pts[pip], pts[0])*G.extendRatio;
-  const index = ext(8, 6), middle = ext(12, 10);
+  const index = ext(8, 6);
   const thumb = dist(pts[4], pts[5])/size, gap = dist(pts[4], pts[8])/size;
   const tv = { x:pts[4].x - pts[2].x, y:pts[4].y - pts[2].y }, iv = { x:pts[8].x - pts[5].x, y:pts[8].y - pts[5].y };
   const cos = (tv.x*iv.x + tv.y*iv.y)/((Math.hypot(tv.x, tv.y)*Math.hypot(iv.x, iv.y)) || 1), ang = Math.acos(clamp(cos, -1, 1))*180/Math.PI;
   const L = index && thumb > G.thumbOut && ang > G.lMinAngle;
   const unit = v => { const l = Math.hypot(v.x, v.y) || 1; return { x:v.x/l, y:v.y/l }; };
-  return { pts, size, center:pts[9], L, pinch:gap < G.pinch, middle,
+  return { pts, size, center:pts[9], L, gap, thumbTip:pts[4], indexTip:pts[8],
            vtx:{ x:(pts[2].x + pts[5].x)/2, y:(pts[2].y + pts[5].y)/2 },     // the corner of the L, where thumb meets index
            thumbDir:unit(tv), indexDir:unit(iv),
-           note:`i${+index} t${thumb.toFixed(2)} a${ang | 0} gap${gap.toFixed(2)} m${+middle}` };
+           note:`i${+index} t${thumb.toFixed(2)} a${ang | 0} gap${gap.toFixed(2)}` };
 }
 
 /**
- * Director's frame from two L hands: the L corners are two opposite corners; the other two are where
- * one hand's index line crosses the other hand's thumb line (pairing whichever edges are most
- * perpendicular). If the lines are nearly parallel or cross far away, fall back to an upright box.
+ * The frame two L hands enclose, however they're held: corners diagonal (director's frame) or both at
+ * the bottom like holding a camera, index fingers up and thumbs along the bottom.
+ * Its tilt is the average direction of the two index fingers (modulo 90°, so up/down/sideways agree; thumbs
+ * rotate when you pinch, so they don't steer it);
+ * its extent is the box, in that tilted frame, around both L corners and both index fingertips. Thumbs
+ * are left out (they move when you pinch to take the photo) unless the box would otherwise be flat,
+ * e.g. a hold with thumbs pointing up and index fingers sideways.
+ * Returns [TL, TR, BR, BL] in the frame's own axes.
  */
 function frameQuad(a, b) {
-  const cross = (u, v) => u.x*v.y - u.y*v.x;
-  const meet = (p, d, q, e) => {
-    const den = cross(d, e); if (Math.abs(den) < .25) return null;
-    const t = cross({ x:q.x - p.x, y:q.y - p.y }, e)/den;
-    return { x:p.x + d.x*t, y:p.y + d.y*t };
-  };
-  const straight = Math.abs(cross(a.indexDir, b.thumbDir)) + Math.abs(cross(a.thumbDir, b.indexDir));
-  const swapped = Math.abs(cross(a.indexDir, b.indexDir)) + Math.abs(cross(a.thumbDir, b.thumbDir));
-  const [e1, e2] = straight >= swapped ? [b.thumbDir, b.indexDir] : [b.indexDir, b.thumbDir];
-  let c1 = meet(a.vtx, a.indexDir, b.vtx, e1), c2 = meet(a.vtx, a.thumbDir, b.vtx, e2);
-  const span = dist(a.vtx, b.vtx), near = p => p && dist(p, a.vtx) < span*1.4 && dist(p, b.vtx) < span*1.4;
-  if (!near(c1) || !near(c2)) { c1 = { x:a.vtx.x, y:b.vtx.y }; c2 = { x:b.vtx.x, y:a.vtx.y }; }
-  return orderQuad([a.vtx, c1, b.vtx, c2]);
+  let cx = 0, sy = 0;
+  for (const d of [a.indexDir, b.indexDir]) { const k = Math.atan2(d.y, d.x)*4; cx += Math.cos(k); sy += Math.sin(k); }
+  const th = Math.atan2(sy, cx)/4, c = Math.cos(th), s = Math.sin(th);
+  const toLocal = p => ({ x:p.x*c + p.y*s, y:-p.x*s + p.y*c });
+  let local = [a.vtx, a.indexTip, b.vtx, b.indexTip].map(toLocal);
+  const ext = pts => [Math.max(...pts.map(p => p.x)) - Math.min(...pts.map(p => p.x)), Math.max(...pts.map(p => p.y)) - Math.min(...pts.map(p => p.y))];
+  const [w, h] = ext(local);
+  if (Math.min(w, h) < Math.max(w, h)*.3) local = local.concat([a.thumbTip, b.thumbTip].map(toLocal));
+  const xs = local.map(p => p.x), ys = local.map(p => p.y);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const back = (x, y) => ({ x:x*c - y*s, y:x*s + y*c });
+  return [back(x0, y0), back(x1, y0), back(x1, y1), back(x0, y1)];
 }
 
 /* ============================== 4. FRAME ============================== */
-/** The lens: the director's frame between two L hands, smoothed, with a short history for snaps. */
+/** The lens: the director's frame between two L hands, smoothed. */
 class FrameTracker {
-  constructor() { this.open = false; this.openSince = 0; this.count = 0; this.lastSeen = -1e9; this.quad = null; this.history = []; }
+  constructor() { this.open = false; this.openSince = 0; this.lastOpen = -1e9; this.count = 0; this.lastSeen = -1e9; this.quad = null; }
   update(hands, t, W, H) {
     const G = CONFIG.gesture, Ls = hands.filter(h => h.L);
     let q = null;
@@ -165,20 +168,11 @@ class FrameTracker {
       }
       this.quad = q; this.lastSeen = t; this.count++;
       if (this.count >= G.openFrames && !this.open) { this.open = true; this.openSince = t; }
-      this.history.push({ t, quad:q.map(p => ({ ...p })) });
+      if (this.open) this.lastOpen = t;
     } else {
       this.count = 0;
       if (this.open && t - this.lastSeen > G.graceMs) this.open = false;
     }
-    while (this.history.length && t - this.history[0].t > G.historyMs) this.history.shift();
-  }
-  /** Up right now (not just coasting on the grace period) and for at least ms. */
-  steady(t, ms) { return this.open && t - this.lastSeen < 80 && t - this.openSince >= ms; }
-  /** The frame as it was `lag` ms before t (the fingers were still open), or null. */
-  quadBefore(t, lag) {
-    let best = null;
-    for (const e of this.history) if (e.t <= t - lag) best = e;
-    return (best || this.history[0] || {}).quad || null;
   }
 }
 
@@ -207,48 +201,54 @@ class Motion {
 }
 
 /**
- * Snap = both hands pinch within a short window. Each pinch only counts if it starts while the frame is up
- * and the hands are still, so curling your fingers while lowering your hands doesn't take a photo.
+ * Snap = pinch ONE hand while the other keeps its corner. Pinching breaks that hand's L long before
+ * the fingers meet, so the frame is allowed to have been whole up to snapArmMs ago, as long as the
+ * other hand is still an L and nothing is moving away. progress[side] (0..1) drives the shutter ring.
  */
 class SnapDetector {
-  constructor() { this.prev = [false, false]; this.at = [-1e9, -1e9]; this.lastSnap = -1e9; }
+  constructor() { this.prev = [false, false]; this.lastL = [-1e9, -1e9]; this.progress = [0, 0]; this.latched = [false, false]; this.lastSnap = -1e9; }
   update(sides, t, frame, motion) {
-    const G = CONFIG.gesture;
+    const G = CONFIG.gesture, armed = t - frame.lastOpen < G.snapArmMs;
+    let fire = false;
+    for (const s of [0, 1]) if (sides[s] && sides[s].L) this.lastL[s] = t;
     for (const s of [0, 1]) {
-      const now = !!(sides[s] && sides[s].pinch);
-      if (now && !this.prev[s]) this.at[s] = (t - frame.lastSeen < G.pinchFromFrameMs && motion.still()) ? t : -1e9;
-      if (!now) this.at[s] = -1e9;                                          // let go: that pinch no longer counts
+      const h = sides[s], framing = armed && t - this.lastL[1 - s] < G.otherLMs;
+      if (!h || h.gap > G.pinchStart) this.latched[s] = false;              // fingers opened again: ready for the next shot
+      this.progress[s] = h && framing && !this.latched[s] ? clamp((G.pinchStart - h.gap)/(G.pinchStart - G.pinch), 0, 1) : 0;
+      const now = !!(h && h.gap < G.pinch);
+      if (now && !this.prev[s] && framing && !this.latched[s] && motion.still() && t - this.lastSnap > 700) { fire = true; this.latched[s] = true; }
       this.prev[s] = now;
     }
-    const both = this.at[0] > 0 && this.at[1] > 0 && Math.abs(this.at[0] - this.at[1]) < G.snapWindowMs && Math.max(...this.at) === t;
-    if (both && motion.still() && t - this.lastSnap > 600) { this.lastSnap = t; this.at = [-1e9, -1e9]; return true; }
-    return false;
+    if (fire) { this.lastSnap = t; this.progress = [0, 0]; }
+    return fire;
   }
+  get pinching() { return Math.max(...this.progress) > .05; }
+}
+
+/** Frame tilt in degrees from its more-horizontal edge: 0 = level, + = clockwise on screen. */
+function frameTilt(q) {
+  let u = { x:(q[1].x - q[0].x + q[2].x - q[3].x)/2, y:(q[1].y - q[0].y + q[2].y - q[3].y)/2 };
+  const v = { x:(q[3].x - q[0].x + q[2].x - q[1].x)/2, y:(q[3].y - q[0].y + q[2].y - q[1].y)/2 };
+  if (Math.abs(v.x) > Math.abs(u.x)) u = v;
+  if (u.x < 0) u = { x:-u.x, y:-u.y };
+  return Math.atan2(u.y, u.x)*180/Math.PI;
 }
 
 /**
- * Middle-finger flick (straighten, then curl again) while holding a steady frame.
- * Returns -1 (left hand: previous lens), 1 (right hand: next lens) or 0.
- * A finger that hovers half-out flickers between states: each change needs two readings in a row,
- * the straight phase must last clickMinMs–clickMaxMs, and the frame must be up and still.
+ * Lens dial: tilt the frame past tiltTurn degrees to turn one lens (clockwise = next), then bring it
+ * back near level to arm the next turn. A frame that opens already tilted has to be levelled first.
+ * Returns -1, 0 or 1.
  */
-class ClickDetector {
-  constructor() { this.state = [false, false]; this.stable = [0, 0]; this.upAt = [-1e9, -1e9]; this.last = -1e9; }
-  update(sides, t, frame, motion) {
-    const G = CONFIG.gesture; let click = 0;
-    for (const s of [0, 1]) {
-      const h = sides[s];
-      if (!h) { this.stable[s] = 0; this.upAt[s] = -1e9; continue; }
-      if (h.middle === this.state[s]) { this.stable[s] = 0; continue; }
-      if (++this.stable[s] < 2) continue;
-      this.state[s] = h.middle; this.stable[s] = 0;
-      if (h.middle) { this.upAt[s] = frame.steady(t, G.clickSteadyMs) ? t : -1e9; continue; }
-      const held = t - this.upAt[s];
-      if (this.upAt[s] > 0 && held >= G.clickMinMs && held <= G.clickMaxMs && frame.steady(t, G.clickSteadyMs)
-          && motion.still() && t - this.last > G.clickCooldownMs) { this.last = t; click = s ? 1 : -1; }
-      this.upAt[s] = -1e9;
-    }
-    return click;
+class TiltDial {
+  constructor() { this.armed = false; this.angle = 0; this.wasOpen = false; }
+  update(frame, t) {
+    const G = CONFIG.gesture;
+    if (!frame.open || !frame.quad) { this.wasOpen = false; return 0; }
+    const a = this.angle = frameTilt(frame.quad);
+    if (!this.wasOpen) { this.wasOpen = true; this.armed = Math.abs(a) < G.tiltTurn - 8; }
+    if (Math.abs(a) < G.tiltLevel) { this.armed = true; return 0; }
+    if (this.armed && t - frame.openSince > G.tiltSteadyMs && Math.abs(a) >= G.tiltTurn) { this.armed = false; return a > 0 ? 1 : -1; }
+    return 0;
   }
 }
 
@@ -301,7 +301,8 @@ class App {
     this.sound = createSound(() => this.panel.levels());
     this.roll = new Roll({ sound:this.sound, max:CONFIG.photo.roll });
     this.lens = new LensView(CONFIG.lens.width); this.photoLens = new LensView(CONFIG.lens.photoWidth);
-    this.frameT = new FrameTracker(); this.snaps = new SnapDetector(); this.clicks = new ClickDetector(); this.motion = new Motion();
+    this.frameT = new FrameTracker(); this.snaps = new SnapDetector(); this.dial = new TiltDial(); this.motion = new Motion();
+    this.sides = [null, null]; this.holding = false; this.cleanQuad = null;
     this.hands = []; this.pending = null; this.running = false; this.lastT = 0; this.t = 0;
     this.lensIdx = 0; this.openA = 0; this.bootT = 0; this.switchT = 0; this.shutterT = 0; this.flash = 0; this.cooldown = 0;
     this.exposures = 0; this.lastFramed = -1e9; this.wasOpen = false; this.drawQuad = null;
@@ -350,21 +351,27 @@ class App {
 
   ingest({ res, t }, W, H) {
     this.hands = (res.multiHandLandmarks || []).map(lm => readHand(lm, W, H));
-    const F = this.frameT, sides = sided(this.hands, W);
+    const F = this.frameT, sides = this.sides = sided(this.hands, W);
     F.update(this.hands, t, W, H);
     this.motion.update(sides, t);
-    const click = this.clicks.update(sides, t, F, this.motion);
-    if (click) this.switchLens(click);
-    if (this.snaps.update(sides, t, F, this.motion)) this.snap(F.quadBefore(t, CONFIG.gesture.snapLagMs));
+    if (!this.snaps.pinching && F.open) this.cleanQuad = F.quad.map(p => ({ ...p }));   // the frame before any pinch moved a thumb
+    const turn = this.snaps.pinching ? 0 : this.dial.update(F, t);
+    if (turn) this.switchLens(turn);
+    if (this.snaps.update(sides, t, F, this.motion)) this.snap(this.cleanQuad || F.quad);
+    // keep the lens up, and still, while a pinch closes, including the moment where the pinching hand
+    // has stopped being an L but the ring hasn't started yet (the other hand still holds its corner)
+    const cornerHeld = sides.some(h => h && h.L);
+    this.holding = this.snaps.pinching || (!F.open && cornerHeld && t - F.lastOpen < 450);
     this.panel.setDebug(this.hands.map((h, i) => `H${i + 1} ${h.L ? 'L' : '·'} ${h.note}`).join('   ') || 'no hands');
   }
 
   update(dt) {
-    const F = this.frameT;
-    if (F.open && !this.wasOpen) { this.bootT = CONFIG.lens.boot; this.sound.shot('boot'); }
-    this.wasOpen = F.open;
-    if (F.open) { this.lastFramed = this.t; this.drawQuad = F.quad; }
-    this.openA = clamp(this.openA + (F.open ? dt/.12 : -dt/.18), 0, 1);
+    const F = this.frameT, shown = F.open || this.holding;
+    if (shown && !this.wasOpen) { this.bootT = CONFIG.lens.boot; this.sound.shot('boot'); }
+    this.wasOpen = shown;
+    if (F.open) this.lastFramed = this.t;
+    if (this.holding && this.cleanQuad) this.drawQuad = this.cleanQuad; else if (F.open) this.drawQuad = F.quad;
+    this.openA = clamp(this.openA + (shown ? dt/.12 : -dt/.18), 0, 1);
     for (const k of ['bootT', 'switchT', 'shutterT', 'cooldown']) this[k] = Math.max(0, this[k] - dt);
     this.flash = Math.max(0, this.flash - dt*4);
     this.sound.update(this.openA);
@@ -427,7 +434,9 @@ class App {
       if (this.shutterT > 0) this.blades(ctx, q);
       ctx.restore();
       this.brackets(ctx, q, u, boot, lens);
+      if (this.frameT.open && !this.holding) this.gauge(ctx, q, u);
     }
+    this.shutterRings(ctx, u);
 
     // 2. flash, skeleton
     if (this.flash > 0) { ctx.fillStyle = `rgba(255,248,235,${this.flash*(this.ctl.reduce ? .2 : .85)})`; ctx.fillRect(0, 0, W, H); }
@@ -454,6 +463,47 @@ class App {
     ctx.fillStyle = '#d2402a'; ctx.beginPath(); ctx.arc(tl.x + fs*.55, tl.y - fs*.98, fs*.22, 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = '#fff6e4'; ctx.fillText(label, tl.x + fs*1.0, tl.y - fs*.45);
     ctx.restore();
+  }
+
+  /** Tilt gauge above the frame: a needle shows the tilt, the ticks at ±tiltTurn are the next / previous lens. */
+  gauge(ctx, q, u) {
+    const G = CONFIG.gesture, cx = q.reduce((s, p) => s + p.x, 0)/4, cy = q.reduce((s, p) => s + p.y, 0)/4;
+    let top = null;
+    for (let i = 0; i < 4; i++) { const a = q[i], b = q[(i + 1) % 4], m = { x:(a.x + b.x)/2, y:(a.y + b.y)/2 }; if (!top || m.y < top.y) top = m; }
+    const n = Math.hypot(top.x - cx, top.y - cy) || 1, R = u*.065, p = { x:top.x + (top.x - cx)/n*R*1.25, y:top.y + (top.y - cy)/n*R*1.25 };
+    const rad = d => (-90 + d)*Math.PI/180, span = G.tiltTurn + 14, a = this.dial.angle, armed = this.dial.armed;
+    const lensAt = d => LENSES[(this.lensIdx + d + LENSES.length) % LENSES.length];
+    ctx.save(); ctx.globalAlpha = this.openA*.95; ctx.lineCap = 'round'; ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 4;
+    ctx.strokeStyle = 'rgba(255,246,228,.45)'; ctx.lineWidth = Math.max(1.5, u*.003);
+    ctx.beginPath(); ctx.arc(p.x, p.y, R, rad(-span), rad(span)); ctx.stroke();
+    const fs = Math.max(13, u*.03); ctx.font = '600 ' + fs + 'px "Fraunces", Georgia, serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const side of [-1, 1]) {                                          // the two turn points, labelled with the lens they lead to
+      const d = side*G.tiltTurn, hot = side*a >= G.tiltTurn*.6 && armed;
+      ctx.strokeStyle = hot ? '#d2402a' : 'rgba(255,246,228,.85)'; ctx.lineWidth = Math.max(2, u*.005);
+      ctx.beginPath(); ctx.moveTo(p.x + Math.cos(rad(d))*R*.82, p.y + Math.sin(rad(d))*R*.82); ctx.lineTo(p.x + Math.cos(rad(d))*R*1.18, p.y + Math.sin(rad(d))*R*1.18); ctx.stroke();
+      ctx.fillStyle = hot ? '#ffd9cf' : 'rgba(255,246,228,.75)';
+      ctx.fillText(lensAt(side).kanji, p.x + Math.cos(rad(d))*R*1.62, p.y + Math.sin(rad(d))*R*1.62);
+    }
+    const na = clamp(a, -span, span);                                      // the needle: cream when armed, amber while waiting to be levelled
+    ctx.strokeStyle = armed ? '#fff6e4' : '#e8a33a'; ctx.lineWidth = Math.max(2, u*.006);
+    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + Math.cos(rad(na))*R*1.05, p.y + Math.sin(rad(na))*R*1.05); ctx.stroke();
+    ctx.fillStyle = armed ? '#fff6e4' : '#e8a33a'; ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2.5, u*.006), 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  /** Shutter ring at a pinching hand: fills as thumb and index close, like half-pressing a shutter button. */
+  shutterRings(ctx, u) {
+    const pr = this.snaps.progress;
+    this.sides.forEach((h, s) => {
+      if (!h || pr[s] < .08) return;
+      const c = { x:(h.thumbTip.x + h.indexTip.x)/2, y:(h.thumbTip.y + h.indexTip.y)/2 }, R = Math.max(u*.035, h.size*.42);
+      ctx.save(); ctx.lineCap = 'round'; ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 5;
+      ctx.strokeStyle = 'rgba(255,246,228,.4)'; ctx.lineWidth = Math.max(2, u*.006); ctx.beginPath(); ctx.arc(c.x, c.y, R, 0, Math.PI*2); ctx.stroke();
+      ctx.strokeStyle = '#d2402a'; ctx.lineWidth = Math.max(3, u*.01);
+      ctx.beginPath(); ctx.arc(c.x, c.y, R, -Math.PI/2, -Math.PI/2 + pr[s]*Math.PI*2); ctx.stroke();
+      ctx.fillStyle = 'rgba(210,64,42,' + (.25 + .6*pr[s]) + ')'; ctx.beginPath(); ctx.arc(c.x, c.y, R*.32*(.6 + .4*pr[s]), 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+    });
   }
 
   /** Lens switch: torn horizontal slices and static inside the frame. */

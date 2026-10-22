@@ -29,7 +29,7 @@ track-lab/
 │   │   ├── face-fx.js     optional face filters: glowing recoloured eyes, dyed hair
 │   │   └── bgm.mp3
 │   └── frame-it/
-│       ├── main.js        gestures (L frame, middle-finger click, two-hand pinch), frame tracking, render
+│       ├── main.js        gestures (two-hand frame, tilt dial, one-hand pinch), frame tracking, render
 │       ├── lenses.js      Inverted, X-Ray, Thermal, Manga Ink, Prism
 │       ├── photo.js       straighten the frame into a photo, polaroid card
 │       └── roll.js        photo roll, viewer, polaroid printer
