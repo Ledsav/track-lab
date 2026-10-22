@@ -7,7 +7,7 @@ Video never leaves your device: tracking runs locally with [MediaPipe](https://a
 
 | # | Experience | Tracks | What it does |
 |---|---|---|---|
-| 01 | [Cursed Hands](experiences/cursed-hands/) | hands | Jujutsu Kaisen hand seals: Unlimited Void, Blue, Red, Hollow Purple |
+| 01 | [Cursed Hands](experiences/cursed-hands/) | hands | Jujutsu Kaisen hand seals with Japanese voice lines, plus an exorcism wave mode |
 
 ## Structure
 
@@ -21,7 +21,9 @@ track-lab/
 │   └── cursed-hands/          one folder per experience, self-contained
 │       ├── index.html
 │       ├── style.css
-│       ├── main.js
+│       ├── main.js        techniques, effects, panel, app loop
+│       ├── curses.js      exorcism mode: curse designs + wave logic
+│       ├── voice.js       Japanese call-outs (recorded clips or speech synthesis)
 │       └── bgm.mp3
 ├── shared/
 │   ├── js/hands.js            MediaPipe Hands loader, camera start, skeleton / mirrored video drawing

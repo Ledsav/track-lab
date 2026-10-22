@@ -20,6 +20,8 @@
 import { TAU, clamp, lerp, rand, ease, dist, V3, mulberry, prune } from '../../shared/js/math.js';
 import { $, matches, isPhone, spacing, toggleFullscreen, canFullscreen } from '../../shared/js/dom.js';
 import { startHands, drawSkeleton, drawMirroredVideo } from '../../shared/js/hands.js';
+import { CurseWaves } from './curses.js';
+import { createVoice, LINES } from './voice.js';
 
 /* ============================== 1. CONFIG ============================== */
 const CONFIG = {
@@ -40,7 +42,8 @@ const CONFIG = {
   },
   ready: .35,                  // charge fraction after which a flick fires
   domain: { chargeTime:1.2, collapseTime:.7, stars:260 },
-  orb:    { chargeTime:1.4, decayTime:.5, mergeChargeTime:.5, cooldown:.8, firedFlash:.55 },
+  orb:    { chargeTime:1.4, decayTime:.5, mergeChargeTime:.5, cooldown:.8, firedFlash:.55,
+            float:.55 },        // default for the Orb distance slider: how far past the fingertip the orb floats, × hand size (~5 cm)
   // projectiles travel a fixed share of the screen diagonal (so they always land on-screen)
   // and grow as they fly, reading as "coming at the camera"
   blue:   { flight:.42, reach:.30, growth:1.45, wellLife:1.4, collapse:.28, maxWells:2 },
@@ -65,24 +68,42 @@ const COL = CONFIG.colors, READY = CONFIG.ready, SERIF = CONFIG.fonts.serif, LAT
 const Clock = { t:0 };
 
 /* ============================== 3. SOUND ============================== */
-/** Fully synthesized audio. `getVolume()` returns 0..1. Must be init() from a user gesture. */
-function createSound(getVolume) {
-  let ac = null, master, noiseBuf; const loops = {};
+/**
+ * Fully synthesized audio. Must be init() from a user gesture.
+ * getLevels() → { master, sfx, voice } each 0..1. Routing:
+ *   loops + hits → sfx bus ─┐
+ *   voice clips → voice bus ├→ master → compressor → out
+ *   music (attachMedia)  ───┘
+ */
+function createSound(getLevels) {
+  let ac = null, master, sfx, voiceBus, reverb, noiseBuf; const loops = {};
 
   function init() {
     if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
     ac = new AC();
     const comp = ac.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 6;
-    master = ac.createGain(); master.gain.value = getVolume(); master.connect(comp); comp.connect(ac.destination);
+    const lv = getLevels();
+    master = ac.createGain(); master.gain.value = lv.master; master.connect(comp); comp.connect(ac.destination);
+    sfx = ac.createGain(); sfx.gain.value = lv.sfx; sfx.connect(master);
+    voiceBus = ac.createGain(); voiceBus.gain.value = lv.voice; voiceBus.connect(master);
     const len = ac.sampleRate*2; noiseBuf = ac.createBuffer(1, len, ac.sampleRate);
     const d = noiseBuf.getChannelData(0); for (let i = 0; i < len; i++) d[i] = Math.random()*2 - 1;
     buildLoops();
+    buildReverb();
+  }
+
+  /** A big dark hall for the voice: decaying stereo noise as the impulse response. */
+  function buildReverb() {
+    const len = Math.floor(ac.sampleRate*2.4), ir = ac.createBuffer(2, len, ac.sampleRate);
+    for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random()*2 - 1)*Math.pow(1 - i/len, 3.2); }
+    reverb = ac.createConvolver(); reverb.buffer = ir;
+    const wet = ac.createGain(); wet.gain.value = .45; reverb.connect(wet); wet.connect(voiceBus);
   }
 
   function buildLoops() {
     const osc = (type, f) => { const o = ac.createOscillator(); o.type = type; o.frequency.value = f; o.start(); return o; };
-    const out = () => { const g = ac.createGain(); g.gain.value = 0; g.connect(master); return g; };
+    const out = () => { const g = ac.createGain(); g.gain.value = 0; g.connect(sfx); return g; };
     const lp  = (f, q) => { const n = ac.createBiquadFilter(); n.type = 'lowpass'; n.frequency.value = f; n.Q.value = q || 1; return n; };
     { // BLUE: airy rising hum
       const g = out(), f = lp(800,4), o1 = osc('sine',220), o2 = osc('triangle',221.5), o3 = osc('sine',440), g3 = ac.createGain(); g3.gain.value = .3;
@@ -115,7 +136,8 @@ function createSound(getVolume) {
   function update(lv) {
     if (!ac) return;
     const t = ac.currentTime, s = (param, v, tc) => param.setTargetAtTime(v, t, tc || .06);
-    s(master.gain, getVolume(), .05);
+    const v = getLevels();
+    s(master.gain, v.master, .05); s(sfx.gain, v.sfx, .05); s(voiceBus.gain, v.voice, .05);
     let L = loops.blue;   s(L.g.gain, .2*lv.blue, .08);   s(L.f.frequency, 500 + 2600*lv.blue);
     s(L.oscs[0].frequency, 200 + 380*lv.blue); s(L.oscs[1].frequency, 201.5 + 380*lv.blue); s(L.oscs[2].frequency, 400 + 760*lv.blue);
     L = loops.red;        s(L.g.gain, .16*lv.red, .08);   s(L.f.frequency, 500 + 2200*lv.red);
@@ -132,14 +154,14 @@ function createSound(getVolume) {
     const fl = ac.createBiquadFilter(); fl.type = type; fl.Q.value = q;
     fl.frequency.setValueAtTime(f0, t); fl.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
     const g = ac.createGain(); g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + attack); g.gain.exponentialRampToValueAtTime(.0001, t + dur);
-    src.connect(fl); fl.connect(g); g.connect(master); src.start(t, Math.random()); src.stop(t + dur + .05);
+    src.connect(fl); fl.connect(g); g.connect(sfx); src.start(t, Math.random()); src.stop(t + dur + .05);
   }
   function tone(type, f0, f1, dur, o = {}) {
     const { gain = .5, attack = .005, delay = 0 } = o;
     const t = ac.currentTime + delay, osc = ac.createOscillator(); osc.type = type;
     osc.frequency.setValueAtTime(f0, t); osc.frequency.exponentialRampToValueAtTime(Math.max(15, f1), t + dur);
     const g = ac.createGain(); g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + attack); g.gain.exponentialRampToValueAtTime(.0001, t + dur);
-    osc.connect(g); g.connect(master); osc.start(t); osc.stop(t + dur + .05);
+    osc.connect(g); g.connect(sfx); osc.start(t); osc.stop(t + dur + .05);
   }
   const shots = {
     ready:       () => { tone('sine',1320,1320,.28,{gain:.18}); tone('sine',1980,1980,.22,{gain:.1,delay:.05}); },
@@ -151,6 +173,15 @@ function createSound(getVolume) {
     purpleFire:  () => { tone('sine',80,25,2.2,{gain:1}); noise(2.2,{type:'lowpass',f0:6000,f1:150,gain:.9}); tone('sawtooth',150,1800,.5,{gain:.3}); noise(.6,{type:'highpass',f0:1500,f1:9000,gain:.4}); tone('sine',3000,3000,1.2,{gain:.08}); },
     domainStart: () => { tone('sine',60,120,1.2,{gain:.4}); noise(1.2,{f0:300,f1:3000,q:2,gain:.25}); },
     domainBoom:  () => { tone('sine',70,25,1.6,{gain:1}); noise(1.4,{type:'lowpass',f0:4000,f1:100,gain:.8}); tone('sine',440,438,1.6,{gain:.12}); tone('sine',660,657,1.4,{gain:.08}); },
+    // exorcism mode
+    curseSpawn:  () => { tone('sawtooth',95,55,.7,{gain:.1,attack:.08}); noise(.7,{type:'lowpass',f0:700,f1:180,gain:.14,attack:.1}); },
+    bossRoar:    () => { noise(1.6,{f0:320,f1:110,q:2.5,gain:.8,attack:.15}); tone('sawtooth',72,44,1.6,{gain:.35,attack:.12}); tone('square',110,70,1.2,{gain:.08,attack:.2}); },
+    curseHit:    () => { noise(.12,{type:'highpass',f0:2400,f1:900,gain:.3}); tone('square',240,110,.1,{gain:.08}); },
+    curseDie:    () => { noise(.55,{f0:1600,f1:140,q:1.5,gain:.4}); tone('sine',320,60,.45,{gain:.3}); tone('sine',1568,1568,.5,{gain:.07,delay:.06}); tone('sine',2349,2349,.4,{gain:.04,delay:.1}); },
+    hurt:        () => { tone('sawtooth',130,38,.55,{gain:.45}); noise(.45,{type:'lowpass',f0:1400,f1:90,gain:.7}); },
+    waveStart:   () => { tone('sine',196,195,2.4,{gain:.32,attack:.01}); tone('sine',196*2.76,196*2.75,1.6,{gain:.12}); tone('sine',196*5.4,196*5.38,.9,{gain:.05}); noise(1.2,{f0:200,f1:1800,q:5,gain:.08}); },
+    waveClear:   () => { [784,988,1175,1568].forEach((f,i) => tone('sine',f,f,.6,{gain:.09,delay:i*.07})); },
+    gameOver:    () => { tone('sine',150,36,2.4,{gain:.6}); noise(2.2,{type:'lowpass',f0:900,f1:60,gain:.5}); tone('sine',233,231,2,{gain:.1,delay:.2}); },
   };
   function shot(name) { if (ac && shots[name]) shots[name](); }
 
@@ -162,7 +193,17 @@ function createSound(getVolume) {
     return { gain:g, ac };
   }
 
-  return { init, update, shot, attachMedia };
+  /** Decode a fetched clip (ArrayBuffer → AudioBuffer). */
+  function decode(ab) { return ac ? new Promise((res, rej) => ac.decodeAudioData(ab, res, rej)) : Promise.reject(new Error('no audio')); }
+  /** Play a voice clip: slightly slowed for weight, dry + hall reverb, on the voice bus. Returns its duration (s). */
+  function playVoice(buf, rate = .94) {
+    if (!ac) return 0;
+    const src = ac.createBufferSource(); src.buffer = buf; src.playbackRate.value = rate;
+    src.connect(voiceBus); src.connect(reverb); src.start();
+    return buf.duration/rate;
+  }
+
+  return { init, update, shot, attachMedia, decode, playVoice, get ready() { return !!ac; } };
 }
 
 
@@ -561,7 +602,9 @@ class PoseTracker {
         const p = name === 'domain' ? h.center : h.tip;
         if (!s.seen) { s.pos = { x:p.x, y:p.y }; s.seen = true; }
         else { s.pos.x += (p.x - s.pos.x)*G.posSmoothing; s.pos.y += (p.y - s.pos.y)*G.posSmoothing; }
-        s.size = h.size; s.dir = h.dir;
+        s.size = h.size;
+        const dx = s.dir.x + (h.dir.x - s.dir.x)*G.posSmoothing, dy = s.dir.y + (h.dir.y - s.dir.y)*G.posSmoothing, dl = Math.hypot(dx, dy) || 1;
+        s.dir = { x:dx/dl, y:dy/dl };
       }
     }
   }
@@ -675,8 +718,8 @@ class DomainExpansion {
     this.on = pose.on;
     if (this.charge === 0 && pose.on) this.origin = { x:pose.pos.x, y:pose.pos.y };   // the void opens from where it was cast
     this.charge = clamp(this.charge + (pose.on ? dt/D.chargeTime : -dt/D.collapseTime), 0, 1);
-    if (this.charge > .05 && this.prevCharge <= .05) sound.shot('domainStart');
-    if (this.charge >= 1 && this.prevCharge < 1) { sound.shot('domainBoom'); fx.kick({ flash:.5 }); }
+    if (this.charge > .05 && this.prevCharge <= .05 && pose.on) { sound.shot('domainStart'); this.world.voice.say('domainStart'); }
+    if (this.charge >= 1 && this.prevCharge < 1) { sound.shot('domainBoom'); fx.kick({ flash:.5 }); this.world.voice.say('domainName', { priority:3 }); }
     this.prevCharge = this.charge;
     if (this.charge <= 0) return;
     for (const s of this.stars) s.ph += s.v*dt;
@@ -809,6 +852,8 @@ class OrbTechnique {
     this.cooldown = Math.max(0, this.cooldown - dt);
     this.flashT = Math.max(0, this.flashT - dt);
 
+    if (this.charge > .05 && this.prevCharge <= .05 && pose.on && !merge.active) this.world.voice.say(this.kind + 'Start');
+    this.float = input.orbFloat ?? CONFIG.orb.float;
     if (input.flicks[this.kind] && pose.hand && !merge.active && this.ready && this.cooldown <= 0) this.fire(pose.hand, input);
     this.updateProjectiles(dt, input);
     this.updateExtra(dt, input);
@@ -826,7 +871,8 @@ class OrbTechnique {
       o.y = pose.pos.y + (merge.mid.y - pose.pos.y)*merge.pull;
       o.r = merge.avgSize*grow*merge.shrink; o.visible = true;
     } else if (pose.on && this.charge > .02) {
-      o.x = pose.pos.x; o.y = pose.pos.y; o.dir = pose.dir;
+      const f = pose.size*this.float;                                    // float ahead of the fingertip, along the index
+      o.x = pose.pos.x + pose.dir.x*f; o.y = pose.pos.y + pose.dir.y*f; o.dir = pose.dir;
       o.r = pose.size*grow*(1 + .04*Math.sin(Clock.t*this.spec.wobble)); o.visible = true;
     } else o.visible = false;
   }
@@ -835,8 +881,10 @@ class OrbTechnique {
   fire(hand, input) {
     const s = this.spec, C = s.cfg, { fx, sound } = this.world, { W, H, u } = input;
     const r0 = hand.size*(.12 + .24*ease(this.charge)), reach = C.reach*Math.hypot(W,H), m = .1;
-    const ex = clamp(hand.tip.x + hand.dir.x*reach, W*m, W*(1-m)), ey = clamp(hand.tip.y + hand.dir.y*reach, H*m, H*(1-m));
-    this.projectiles.push({ sx:hand.tip.x, sy:hand.tip.y, ex, ey, x:hand.tip.x, y:hand.tip.y, r0, r:r0, t:0, dur:C.flight, trail:[] });
+    const o = this.orb.visible ? this.orb : hand.tip;                    // launch from where the orb was floating
+    const ex = clamp(o.x + hand.dir.x*reach, W*m, W*(1-m)), ey = clamp(o.y + hand.dir.y*reach, H*m, H*(1-m));
+    this.projectiles.push({ sx:o.x, sy:o.y, ex, ey, x:o.x, y:o.y, r0, r:r0, t:0, dur:C.flight, trail:[] });
+    this.world.voice.say(s.voiceFire, { priority:2, force:true });
     this.cooldown = CONFIG.orb.cooldown; this.charge = 0; this.flashT = CONFIG.orb.firedFlash;
     sound.shot(s.fireSound);
     fx.kick({ shake:.3, impact:.045, at:hand.tip, tint:{ rgb:s.color.wash, a:.7 } });
@@ -854,7 +902,7 @@ class OrbTechnique {
         const a = rand(0,6.28), sp = rand(30,120);
         fx.spawn({ x:p.x, y:p.y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp, life:.35, max:.35, col:this.spec.trailRgb, size:rand(1,2.2), streak:.06 });
       }
-      if (u >= 1) { this.onImpact(p.x, p.y, p, input); p.dead = true; }
+      if (u >= 1 || (u > .15 && this.world.game.hitTest(p.x, p.y, p.r*1.6))) { this.onImpact(p.x, p.y, p, input); p.dead = true; }   // curses in the way take it early
     }
     prune(this.projectiles, p => !p.dead);
   }
@@ -897,7 +945,7 @@ class OrbTechnique {
 /* ---------- Blue 蒼: attraction. Lands, drags everything into a well, collapses, then detonates ---------- */
 class Blue extends OrbTechnique {
   constructor(world) {
-    super('blue', world, { color:COL.blue, drawOrb:Draw.blueOrb, cfg:CONFIG.blue, fireSound:'blueFire', kanji:'蒼', titleColor:'#4f8cff',
+    super('blue', world, { color:COL.blue, drawOrb:Draw.blueOrb, cfg:CONFIG.blue, fireSound:'blueFire', voiceFire:'blueFire', kanji:'蒼', titleColor:'#4f8cff',
                            wobble:18, trailRgb:'120,180,255', seed:2 });
     this.wells = [];
   }
@@ -915,6 +963,8 @@ class Blue extends OrbTechnique {
       g.t += dt;
       if (g.t >= g.life) { this.detonate(g); continue; }
       const c = clamp((g.t - (g.life - B.collapse))/B.collapse, 0, 1);
+      this.world.game.pull(g.x, g.y, g.r*14, 2.2, dt);                  // drags curses in and holds them
+      this.world.game.damageCircle(g.x, g.y, g.r*2.5, 2*dt);
       for (let k = 0; k < 4 + 6*c; k++) {                             // pull harder as it collapses
         const a = rand(0,6.28), rr = g.r*rand(3,8);
         fx.spawn({ x:g.x+Math.cos(a)*rr, y:g.y+Math.sin(a)*rr, vx:0, vy:0, life:.8, max:.8, col:'140,200,255', size:rand(.8,2), target:g, streak:.05 });
@@ -927,6 +977,7 @@ class Blue extends OrbTechnique {
     const { fx, sound } = this.world, R = g.r;
     sound.shot('wellBoom');
     fx.blast(g.x, g.y, { rgb:'50,110,255', edge:'205,230,255', life:.7, scale:.6 });
+    this.world.game.damageCircle(g.x, g.y, Math.max(R*9, Math.min(this.world.game.env.W, this.world.game.env.H)*.16), 3);
     for (let i = 0; i < 3; i++) fx.wave(g.x, g.y, i ? COL.blue.c2 : '220,235,255', R*(10 + i*6), { delay:i*.06, life:.7, width:8 });
     fx.burst(g.x, g.y, '160,210,255', 80, 250, 1000, { streak:.05, drag:.88 });
     fx.burst(g.x, g.y, '255,255,255', 24, 80, 380, { streak:0, drag:.9 });
@@ -975,14 +1026,15 @@ class Blue extends OrbTechnique {
 /* ---------- Red 赫: repulsion. Fast, straight, detonates on impact ---------- */
 class Red extends OrbTechnique {
   constructor(world) {
-    super('red', world, { color:COL.red, drawOrb:Draw.redOrb, cfg:CONFIG.red, fireSound:'redFire', kanji:'赫', titleColor:'#e0303a',
+    super('red', world, { color:COL.red, drawOrb:Draw.redOrb, cfg:CONFIG.red, fireSound:'redFire', voiceFire:'redFire', kanji:'赫', titleColor:'#e0303a',
                           wobble:22, trailRgb:'255,80,70', seed:5 });
   }
   flightCurve(u) { return u*u; }                                       // accelerates into the hit
-  onImpact(x, y, p) {
+  onImpact(x, y, p, input) {
     const { fx, sound } = this.world, R = p.r;
     sound.shot('redHit');
     fx.blast(x, y, { rgb:'255,40,40', edge:'255,210,200', life:.6, scale:.65 });
+    this.world.game.damageCircle(x, y, Math.max(R*7, input.u*.14), 4, { push:.35 });
     for (let i = 0; i < 3; i++) fx.wave(x, y, i ? COL.red.c2 : '255,230,220', R*(8 + i*5), { delay:i*.05, life:.55, width:9 });
     fx.burst(x, y, '255,110,100', 90, 300, 1200, { streak:.045, drag:.87 });
     fx.burst(x, y, '255,225,215', 30, 60, 300, { streak:0, drag:.92, life:.9 });
@@ -1048,6 +1100,7 @@ class HollowPurple {
     // one-hand sign fires on the flick release
     if (this.handMode && this.idle && this.charge > READY && input.openFlick) this.fire(input.openFlick.dir, input);
 
+    if (this.charge > .05 && this.prevCharge <= .05 && (this.pinch || merge.active)) this.world.voice.say('purpleStart');
     this.updateBeam(dt, input);
     this.prevCharge = this.charge;
 
@@ -1075,6 +1128,8 @@ class HollowPurple {
     fx.blast(x, y, { rgb:'170,100,255', edge:'235,205,255', life:.8, scale:1.25 }); sound.shot('purpleFire');
     for (let i = 0; i < 4; i++) fx.wave(x, y, COL.purple.c1, size*(8 + i*3), { delay:i*.08, life:.9 });
     fx.title('茈', input.W/2, input.H*.5, '#a060ff', input.u*.26, { sub:'HOLLOW PURPLE', life:1.6 });
+    this.world.voice.say('purpleFire', { priority:3, force:true });
+    this.world.game.damageCircle(x, y, size*3, 99);
   }
 
   /** The sphere rolls forward, growing, tearing debris off the edges of its trench. */
@@ -1086,6 +1141,7 @@ class HollowPurple {
     b.travel = Math.hypot(input.W, input.H)*1.4*Math.pow(Math.min(1, b.t/(D*.9)), 1.8);
     b.px = b.x + b.dir.x*b.travel; b.py = b.y + b.dir.y*b.travel;
     b.R = b.size*(.9 + .9*Math.min(1, b.t/.35));
+    this.world.game.damageSegment(b.x, b.y, b.px, b.py, b.R, 99);   // nothing survives the trench
     const nx = -b.dir.y, ny = b.dir.x;
     for (let k = 0; k < 6; k++) {
       const side = Math.random() < .5 ? -1 : 1, s = rand(150,650), along = rand(-.3,.3);
@@ -1165,6 +1221,10 @@ const TECHS = {
   purple: { jp:'茈', chip:'茈', en:'Purple', color:'#9b5cff', how:'1. <b>Load a finger-flick</b>: curl your index against your thumb, other fingers open, palm up toward the camera<br>2. Hold until the ring passes the tick<br>3. <b>Flick</b> the index out to fire<br><i>Alternative:</i> Blue in one hand + Red in the other, tips together.' },
 };
 
+/** Settings that survive a reload (per browser). Checkboxes store checked, everything else its value. */
+const SETTINGS_KEY = 'track-lab:cursed-hands:settings';
+const SAVED = ['vol','mute','music','musicVol','sfx','sfxVol','voice','voiceVol','reduce','fill','skel','swap','orbFloat','pinchThresh','flickSens'];
+
 class Panel {
   constructor(techs) {
     this.app = $('app'); this.cards = {}; this.chips = {};
@@ -1181,33 +1241,85 @@ class Panel {
       $('hud').appendChild(chip);
       this.chips[key] = { el:chip, bar:chip.querySelector('.b > i') };
     }
-    for (const id of ['pinchThresh','flickSens']) {
-      const el = $(id), out = $(id + 'Val');
-      el.addEventListener('input', () => out.textContent = parseFloat(el.value).toFixed(2));
+    this.restore();
+    for (const id of ['pinchThresh','flickSens','orbFloat']) {
+      const el = $(id), out = $(id + 'Val'), show = () => out.textContent = parseFloat(el.value).toFixed(2);
+      el.addEventListener('input', show); show();
     }
-    $('fill').addEventListener('change', e => this.app.classList.toggle('fill', e.target.checked));
+    for (const id of SAVED) $(id).addEventListener('change', () => this.save());
+    for (const id of ['vol','musicVol','sfxVol','voiceVol','orbFloat']) $(id).addEventListener('input', () => this.save());
+    const syncFill = () => this.app.classList.toggle('fill', $('fill').checked);
+    $('fill').addEventListener('change', syncFill); syncFill();
     this.button = $('start');
     $('panelBtn').addEventListener('click', () => this.togglePanel());
     const syncMusicBtn = () => $('musicBtn').classList.toggle('off', !$('music').checked);
-    $('musicBtn').addEventListener('click', () => { $('music').checked = !$('music').checked; syncMusicBtn(); });
-    $('music').addEventListener('change', syncMusicBtn);
+    $('musicBtn').addEventListener('click', () => { $('music').checked = !$('music').checked; syncMusicBtn(); this.save(); });
+    $('music').addEventListener('change', syncMusicBtn); syncMusicBtn();
     $('canvas').addEventListener('click', () => { if (isPhone()) this.togglePanel(false); });   // tap the stage to close the sheet
     if (canFullscreen()) $('fsBtn').addEventListener('click', toggleFullscreen);
     else $('fsBtn').style.display = 'none';                           // e.g. iPhone Safari
     if (matches('(min-width: 1100px)')) this.togglePanel(true);       // big screens start with the drawer open
   }
+  restore() {
+    let saved = {}; try { saved = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch { /* blocked storage: defaults */ }
+    for (const id of SAVED) {
+      const el = $(id); if (!el || !(id in saved)) continue;
+      if (el.type === 'checkbox') el.checked = !!saved[id]; else el.value = saved[id];
+    }
+    this.savedVoice = saved.voiceSel || '';
+  }
+  save() {
+    const out = {};
+    for (const id of SAVED) { const el = $(id); out[id] = el.type === 'checkbox' ? el.checked : el.value; }
+    if ($('voiceSel').value) this.savedVoice = $('voiceSel').value;
+    out.voiceSel = this.savedVoice;
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(out)); } catch { /* private mode */ }
+  }
+  /** Fill the voice picker with the browser's Japanese voices. */
+  setVoices(voices, current) {
+    const sel = $('voiceSel'), hint = $('voiceHint'), esc = t => t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    sel.innerHTML = voices.map(v => `<option value="${esc(v.name)}">${esc(v.name.replace(/^(Microsoft|Google) /, '').replace(/ - Japanese.*| \(Japan\)/, ''))}</option>`).join('');
+    sel.disabled = !voices.length;
+    if (current) sel.value = current.name;
+    hint.textContent = voices.length ? '' : 'No Japanese voice in this browser. Edge has the best ones; on Windows you can also add Japanese under Settings › Time & language › Speech.';
+  }
   togglePanel(force) { const open = force ?? !this.app.classList.contains('panel-open'); this.app.classList.toggle('panel-open', open); }
   controls() {
     return { swap:$('swap').checked, pinchDist:parseFloat($('pinchThresh').value), flickSens:parseFloat($('flickSens').value),
-             reduce:$('reduce').checked, skeleton:$('skel').checked, fill:$('fill').checked };
+             orbFloat:parseFloat($('orbFloat').value), reduce:$('reduce').checked, skeleton:$('skel').checked, fill:$('fill').checked };
   }
-  volume() { return $('mute').checked ? 0 : $('vol').value/100; }
+  master() { return $('mute').checked ? 0 : $('vol').value/100; }
+  levels() {
+    return { master:this.master(), sfx:$('sfx').checked ? $('sfxVol').value/100 : 0, voice:$('voice').checked ? $('voiceVol').value/100 : 0 };
+  }
+  /** Speech synthesis bypasses WebAudio, so it gets master × voice directly. */
+  voiceLevel() { const l = this.levels(); return l.master*l.voice; }
   musicLevel() { return $('music').checked ? $('musicVol').value/100 : 0; }
   setCard(key, { pct, text, active }) {
     const c = this.cards[key], h = this.chips[key], w = (clamp(pct,0,1)*100).toFixed(0) + '%';
     c.bar.style.width = w; h.bar.style.width = w;
     if (c.state.textContent !== text) c.state.textContent = text;
     c.el.classList.toggle('on', !!active); h.el.classList.toggle('on', !!active);
+  }
+  /** Exorcism HUD + game-over card. */
+  setGame(g) {
+    const playing = g.state === 'countdown' || g.state === 'wave' || g.state === 'intermission';
+    this.app.classList.toggle('gaming', playing);
+    this.app.classList.toggle('game-over', g.state === 'over');
+    $('waveBtn').classList.toggle('on', playing);
+    const txt = (id, v) => { const el = $(id); v = String(v); if (el.textContent !== v) el.textContent = v; };
+    txt('best', g.best.toLocaleString());
+    txt('gameBtn', playing ? 'Stop waves' : 'Start waves');
+    if (playing) {
+      txt('gWave', g.wave || '—'); txt('gScore', g.score.toLocaleString());
+      txt('gCombo', g.combo > 1 ? `${g.combo} chain${g.mult > 1 ? ' ×' + g.mult : ''}` : '');
+      txt('gLives', '●'.repeat(g.lives) + '○'.repeat(Math.max(0, g.maxLives - g.lives)));
+      txt('gVoid', g.voidLeft > 0 ? `void ${g.voidLeft.toFixed(1)}s` : '');
+    }
+    if (g.state === 'over') {
+      txt('oScore', g.score.toLocaleString()); txt('oWave', g.wave); txt('oKills', g.kills);
+      txt('oBest', g.newBest ? 'New best!' : `Best ${g.best.toLocaleString()}`);
+    }
   }
   setBadge(text) { const b = $('badge'); if (b.textContent !== text) b.textContent = text; }
   setDebug(html) { $('debug').innerHTML = html; }
@@ -1222,11 +1334,14 @@ class App {
     this.canvas = $('canvas'); this.ctx = this.canvas.getContext('2d'); this.video = $('video');
     this.bg = document.createElement('canvas'); this.bgCtx = this.bg.getContext('2d');   // per-frame backdrop
     this.panel = new Panel(TECHS);
-    this.sound = createSound(() => this.panel.volume());
+    this.sound = createSound(() => this.panel.levels());
     this.music = new Music($('bgm'), this.sound);
     this.fx = new Effects();
+    this.voice = createVoice({ sound:this.sound, getLevel:() => this.panel.voiceLevel(), getVoiceName:() => this.panel.savedVoice });
+    this.voice.onVoices(v => this.panel.setVoices(v, this.voice.current()));
 
-    const world = { fx:this.fx, sound:this.sound };
+    const world = { fx:this.fx, sound:this.sound, voice:this.voice, game:null };
+    this.game = world.game = new CurseWaves(world);
     this.domain = new DomainExpansion(world);
     this.blue   = new Blue(world);
     this.red    = new Red(world);
@@ -1238,11 +1353,29 @@ class App {
 
     this.hands = []; this.pending = null; this.running = false; this.lastT = 0; this.ctl = this.panel.controls();
     this.panel.button.addEventListener('click', () => this.start());
+    for (const id of ['startWaves', 'gameBtn', 'waveBtn', 'againBtn']) $(id).addEventListener('click', () => this.toggleWaves(id === 'againBtn'));
+    $('freeBtn').addEventListener('click', () => { this.game.stop(); this.panel.setGame(this.game.hud()); });
+    $('voiceSel').addEventListener('change', async () => { this.panel.save(); this.sound.init(); await this.voice.init(); this.voice.say('domainStart', { force:true, priority:9 }); });
+    $('voiceTest').addEventListener('click', async () => {
+      this.sound.init(); await this.voice.init();
+      const keys = Object.keys(LINES); this.testIdx = ((this.testIdx ?? -1) + 1) % keys.length;
+      this.voice.say(keys[this.testIdx], { force:true, priority:9 });
+    });
+    this.panel.setGame(this.game.hud());
+  }
+
+  /** Start / stop exorcism mode (starts the camera first if needed). */
+  async toggleWaves(restart = false) {
+    if (this.game.active && !restart) { this.game.stop(); this.panel.setGame(this.game.hud()); return; }
+    if (!this.running) { await this.start(); if (!this.running) return; }
+    this.game.start();
+    if (isPhone()) this.panel.togglePanel(false);
   }
 
   async start() {
     this.sound.init();                                     // audio must be created from a click
     this.music.start();
+    this.voice.init();
     this.panel.setButton('Starting…', true); this.panel.setError('');
     try {
       if (document.fonts) { document.fonts.load(`800 40px ${SERIF}`, '無量空処領域展開蒼赫茈'); document.fonts.load(`500 20px ${LATIN}`, 'FLICK HOLD'); }
@@ -1268,7 +1401,7 @@ class App {
     this.ctl = this.panel.controls();
     this.fx.reduceFlashes = this.ctl.reduce;
 
-    const input = { W, H, u, k:u/720, poses:this.poses.state, flicks:{ blue:false, red:false }, openFlick:null };
+    const input = { W, H, u, k:u/720, poses:this.poses.state, flicks:{ blue:false, red:false }, openFlick:null, orbFloat:this.ctl.orbFloat };
     if (this.pending) { this.ingest(this.pending, input); this.pending = null; }
 
     this.update(dt, input);
@@ -1298,12 +1431,14 @@ class App {
     this.blue.update(dt, input, merge);
     this.red.update(dt, input, merge);
     this.purple.update(dt, input, this.blue, this.red);
+    const focus = this.hands[0] ? this.hands[0].center : { x:input.W/2, y:input.H*.45 };
+    this.game.update(dt, { W:input.W, H:input.H, u:input.u, focus, domainOpen:this.domain.charge >= 1 });
     this.fx.update(dt);
 
     const chargingPurple = this.purple.charge > .05;
     const level = t => (!merge.active && t.on && !chargingPurple) ? t.charge : 0;
     this.sound.update({ blue:level(this.blue), red:level(this.red), purple:this.purple.charge, domain:this.domain.charge });
-    this.music.update(this.panel.musicLevel(), Math.max(this.domain.charge, this.purple.beam ? 1 : this.purple.charge*.6));
+    this.music.update(this.panel.musicLevel(), Math.max(this.domain.charge, this.purple.beam ? 1 : this.purple.charge*.6, this.game.state === 'over' ? .6 : 0));
   }
 
   render(W, H, u) {
@@ -1323,6 +1458,7 @@ class App {
     // 1. the world bends and takes on the technique's colour
     this.blue.renderWells(ctx, scene);
     this.blue.renderBackdrop(ctx, scene);
+    this.game.render(ctx);                                 // curses sit in the world, so the washes colour them too
     this.red.renderWash(ctx, W, H); this.blue.renderWash(ctx, W, H); this.purple.renderWash(ctx, W, H);
     this.fx.drawTint(ctx, W, H);
     this.purple.renderSpeedLines(ctx, W, H);
@@ -1340,6 +1476,7 @@ class App {
     Draw.vignette(ctx, W, H);
     this.domain.renderBanner(ctx, W, H, u);
     this.fx.drawTitles(ctx, W, H);
+    this.game.renderOverlay(ctx, W, H);
     this.fx.drawScreen(ctx, W, H);
     if (this.ctl.skeleton) Draw.skeleton(ctx, this.hands);
     ctx.restore();
@@ -1362,6 +1499,7 @@ class App {
     else if (red.on) badge = red.ready ? '赫 Red — flick' : '赫 Red';
     else if (domain.charge > 0) badge = '領域展開 Casting';
     panel.setBadge(badge);
+    panel.setGame(this.game.hud());
 
     panel.setDebug(this.hands.length
       ? this.hands.map((h,i) => `H${i+1} ${h.isRight ? 'R' : 'L'}: <b style="color:${h.pose === 'purple' ? '#c7a8ff' : '#e8e6e1'}">${h.pose}</b> ${h.note}`).join('<br>')
@@ -1369,4 +1507,4 @@ class App {
   }
 }
 
-new App();
+window.cursedHands = new App();   // handle for poking at it from the console

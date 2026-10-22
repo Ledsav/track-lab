@@ -14,9 +14,9 @@ export const experiences = [
   {
     slug: 'cursed-hands',
     title: 'Cursed Hands',
-    blurb: 'Jujutsu Kaisen hand seals. Cross your fingers to open Unlimited Void, charge Blue and Red, flick out Hollow Purple.',
+    blurb: 'Jujutsu Kaisen hand seals with Japanese call-outs. Open Unlimited Void, flick Blue, Red and Hollow Purple, then survive waves of cursed spirits.',
     tracker: 'hands',
-    tags: ['gestures', 'webaudio', 'vfx'],
+    tags: ['gestures', 'game', 'voice', 'vfx'],
     cover: { glyph: '呪', colors: ['#2846ff', '#c21f2a', '#8232e6'] },
     added: '2026-10-22',
   },

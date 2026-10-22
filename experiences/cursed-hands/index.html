@@ -22,7 +22,7 @@
       <div class="big">呪術</div>
       <div class="sub">Cursed Hands</div>
       <div class="small">Allow camera access · stand back so your hands are visible<br>everything runs locally in your browser</div>
-      <button id="start" class="primary">Start camera</button>
+      <div class="starts"><button id="start" class="primary">Free play</button><button id="startWaves" class="primary seal-btn">Exorcism waves</button></div>
       <div id="err"></div>
     </div>
   </div>
@@ -34,6 +34,7 @@
     </a>
     <div class="actions">
       <span class="rec" id="rec"><i></i>LIVE</span>
+      <button class="icon kanji" id="waveBtn" title="Exorcism waves: start / stop" aria-label="Start or stop exorcism waves">祓</button>
       <button class="icon" id="musicBtn" title="Music on / off" aria-label="Toggle music">♪</button>
       <button class="icon" id="fsBtn" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
       <button class="icon" id="panelBtn" title="Techniques & settings" aria-label="Techniques and settings">☰</button>
@@ -43,15 +44,42 @@
   <div class="hud" id="hud"></div>
   <div class="badge" id="badge">—</div>
 
+  <div class="ghud" id="ghud" aria-live="polite">
+    <span class="gw">Wave <b id="gWave">—</b></span>
+    <span class="gs" id="gScore">0</span>
+    <span class="gl" id="gLives" title="Lives"></span>
+    <span class="gc" id="gCombo"></span>
+    <span class="gv" id="gVoid"></span>
+  </div>
+
+  <div class="gover" id="gover" role="dialog" aria-label="Game over">
+    <div class="gk">祓除失敗</div>
+    <div class="gt">The curses got through</div>
+    <div class="gscore" id="oScore">0</div>
+    <div class="gstats">Wave <b id="oWave">0</b> · <b id="oKills">0</b> exorcised · <span id="oBest"></span></div>
+    <div class="gbtns"><button id="againBtn" class="primary">Again</button><button id="freeBtn">Free play</button></div>
+  </div>
+
   <aside class="panel" id="panel" aria-label="Techniques and settings">
     <div class="grab"></div>
+    <h2>Exorcism</h2>
+    <div class="game-box">
+      <p>Curses crawl out of the dark and come at you. Exorcise them before they reach the camera. Red knocks them back, Blue drags them into its well, Hollow Purple erases a whole line, Unlimited Void freezes everything for 5 s.</p>
+      <div class="row"><button id="gameBtn">Start waves</button><span class="best">Best <b id="best">0</b></span></div>
+    </div>
     <h2>Techniques</h2>
     <div id="techs" style="display:flex;flex-direction:column;gap:9px"></div>
     <div class="tip"><b>Flick</b> — Blue / Red: snap your fingertip quickly toward the screen. Hollow Purple: load a finger-flick (index held against your thumb) and snap the index out. Fire once the ring passes the tick.</div>
-    <h2>Settings</h2>
-    <label class="sw">Volume <input type="range" id="vol" min="0" max="100" value="70" style="flex:1"></label>
+    <h2>Audio</h2>
+    <label class="sw"><span class="lbl">Master</span><input type="range" id="vol" min="0" max="100" value="70"></label>
     <label class="sw"><input type="checkbox" id="mute"> Mute all sound</label>
-    <label class="sw"><input type="checkbox" id="music" checked> Music <input type="range" id="musicVol" min="0" max="100" value="45" style="flex:1"></label>
+    <label class="sw"><input type="checkbox" id="music" checked><span class="lbl">Music</span><input type="range" id="musicVol" min="0" max="100" value="45"></label>
+    <label class="sw"><input type="checkbox" id="sfx" checked><span class="lbl">Effects</span><input type="range" id="sfxVol" min="0" max="100" value="85"></label>
+    <label class="sw"><input type="checkbox" id="voice" checked><span class="lbl">Voice</span><input type="range" id="voiceVol" min="0" max="100" value="90"></label>
+    <div class="sw voice-row"><span class="lbl">Speaker</span><select id="voiceSel" aria-label="Japanese voice"></select><button id="voiceTest" class="mini" type="button">Test</button></div>
+    <div class="hint" id="voiceHint"></div>
+    <h2>Visuals &amp; tracking</h2>
+    <label class="sw"><span class="lbl">Orb distance</span><input type="range" id="orbFloat" min="0" max="1.2" step="0.05" value="0.55"><span id="orbFloatVal" class="val">0.55</span></label>
     <label class="sw"><input type="checkbox" id="reduce"> Reduce flashes (no white / inverted impact frames)</label>
     <label class="sw"><input type="checkbox" id="fill"> Fill screen (crops the camera image)</label>
     <label class="sw"><input type="checkbox" id="skel"> Show hand skeleton</label>
