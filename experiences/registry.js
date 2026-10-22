@@ -20,4 +20,13 @@ export const experiences = [
     cover: { glyph: '呪', colors: ['#2846ff', '#c21f2a', '#8232e6'], logo: 'brand/cursed-hands/mark.svg' },
     added: '2026-10-22',
   },
+  {
+    slug: 'frame-it',
+    title: 'Frame It',
+    blurb: 'An instant camera made of your fingers. Frame the world with both hands to see it through another lens, then pinch to print a polaroid.',
+    tracker: 'hands',
+    tags: ['camera', 'gestures', 'polaroid', 'lenses'],
+    cover: { glyph: '◰', colors: ['#e8a33a', '#d2402a', '#2b2622'], logo: 'brand/frame-it/mark.svg' },
+    added: '2026-10-22',
+  },
 ];

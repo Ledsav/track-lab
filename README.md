@@ -8,6 +8,7 @@ Video never leaves your device: tracking runs locally with [MediaPipe](https://a
 | # | Experience | Tracks | What it does |
 |---|---|---|---|
 | 01 | [Cursed Hands](experiences/cursed-hands/) | hands + face | Jujutsu Kaisen hand seals with Japanese voice lines, an exorcism wave mode, and Gojo face filters (eyes, hair) |
+| 02 | [Frame It](experiences/frame-it/) | hands | An instant camera made of your fingers: frame the world to see it through five lenses, pinch to print a polaroid |
 
 ## Structure
 
@@ -19,16 +20,21 @@ track-lab/
 ├── experiences/
 │   ├── registry.js            list of experiences the hub renders (one entry each)
 │   ├── _template/             starter copied by `npm run new`
-│   └── cursed-hands/          one folder per experience, self-contained
-│       ├── index.html
-│       ├── style.css
-│       ├── main.js        techniques, effects, panel, app loop
-│       ├── curses.js      exorcism mode: curse designs + wave logic
-│       ├── voice.js       Japanese call-outs (recorded clips or speech synthesis)
-│       ├── face-fx.js     optional face filters: glowing recoloured eyes, dyed hair
-│       └── bgm.mp3
+│   ├── cursed-hands/          one folder per experience, self-contained
+│   │   ├── index.html
+│   │   ├── style.css
+│   │   ├── main.js        techniques, effects, panel, app loop
+│   │   ├── curses.js      exorcism mode: curse designs + wave logic
+│   │   ├── voice.js       Japanese call-outs (recorded clips or speech synthesis)
+│   │   ├── face-fx.js     optional face filters: glowing recoloured eyes, dyed hair
+│   │   └── bgm.mp3
+│   └── frame-it/
+│       ├── main.js        gestures (L frame, middle-finger click, two-hand pinch), frame tracking, render
+│       ├── lenses.js      Inverted, X-Ray, Thermal, Manga Ink, Prism
+│       ├── photo.js       straighten the frame into a photo, polaroid card
+│       └── roll.js        photo roll, viewer, polaroid printer
 ├── shared/
-│   ├── js/hands.js            MediaPipe Hands loader, camera start, skeleton / mirrored video drawing
+│   ├── js/hands.js            camera start + hand tracking (Tasks Vision), skeleton / mirrored video drawing
 │   ├── js/vision.js           on-demand face landmarks (irises, lids) + hair/skin/clothes segmentation
 │   ├── js/math.js             clamp, lerp, ease, V3, seeded random, prune…
 │   ├── js/dom.js              $, device checks, loadScript, fullscreen

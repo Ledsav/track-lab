@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c1a17">
+<meta name="description" content="An instant camera made of your fingers. Frame the world with both hands to see it through another lens, then pinch to print a polaroid. Runs locally in your browser.">
+<title>Frame It – Track Lab</title>
+<link rel="icon" href="../../brand/frame-it/mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,400..800,100&family=IBM+Plex+Mono:wght@400;500&family=Caveat:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script>
+  // If a module fails to load or start, say so on the start screen instead of leaving a dead page.
+  addEventListener('error', e => {
+    const el = document.getElementById('err');
+    if (el && !el.textContent) el.textContent = 'Something failed to load (' + (e.message || 'script error') + '). Try a hard refresh: Ctrl+Shift+R (Cmd+Shift+R on Mac).';
+  });
+</script>
+</head>
+<body>
+<div class="app" id="app">
+  <div class="stage">
+    <video id="video" playsinline muted hidden></video>
+    <canvas id="canvas"></canvas>
+  </div>
+  <div class="grain" aria-hidden="true"></div>
+
+  <!-- viewfinder marks over the live image -->
+  <div class="finder" aria-hidden="true">
+    <i class="tick tl"></i><i class="tick tr"></i><i class="tick bl"></i><i class="tick br"></i>
+    <i class="cross"></i>
+    <span class="readout left">ISO 400&ensp;1/125&ensp;<b id="finderLens">INVERTED</b></span>
+    <span class="readout right" id="exp">EXP 00</span>
+  </div>
+
+  <header class="topbar">
+    <a class="brand chip" href="../../" title="Back to Track Lab">
+      <img class="brand-mark" src="../../brand/frame-it/mark.svg" alt="">
+      <span>Frame it</span>
+    </a>
+    <div class="dial chip" role="group" aria-label="Lens">
+      <button type="button" id="prevLens" aria-label="Previous lens">‹</button>
+      <span class="lens-name" id="lensName" aria-live="polite">Inverted</span>
+      <button type="button" id="nextLens" aria-label="Next lens">›</button>
+      <span class="dots" id="lensDots"></span>
+    </div>
+    <div class="actions">
+      <button type="button" class="chip icon" id="fsBtn" aria-label="Fullscreen" title="Fullscreen">⛶</button>
+      <button type="button" class="chip icon" id="setBtn" aria-label="Settings" title="Settings">⚙</button>
+    </div>
+  </header>
+
+  <!-- handwritten note until the first photo -->
+  <div class="note" id="hint" role="note">
+    <svg viewBox="0 0 120 80" aria-hidden="true"><path d="M14 46V14h30M106 34v32H76" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><circle cx="60" cy="40" r="7" fill="#d2402a"/></svg>
+    <p>Make a frame with both hands.<br>Pinch both to take the photo.<br>Flick a middle finger to change lens.</p>
+  </div>
+
+  <!-- the printer slot: prints eject from here when you save -->
+  <div class="printer" id="printer" aria-hidden="true">
+    <div class="slot"></div>
+    <div class="print-window"><div class="print" id="print"><img id="printImg" alt=""></div></div>
+  </div>
+
+  <div class="roll" id="roll" aria-label="Your photos"></div>
+
+  <div class="viewer" id="viewer" hidden role="dialog" aria-label="Photo">
+    <figure class="viewer-card"><img id="viewerImg" alt="Your photo"></figure>
+    <div class="viewer-actions">
+      <button type="button" class="btn primary" id="vSave">Print &amp; save</button>
+      <button type="button" class="btn" id="vShare">Share</button>
+      <button type="button" class="btn" id="vDelete">Delete</button>
+      <button type="button" class="btn ghost" id="vClose">Close</button>
+    </div>
+  </div>
+
+  <aside class="sheet" id="sheet" aria-label="Settings">
+    <div class="sheet-head"><h2>Settings</h2><button type="button" class="btn ghost" id="sheetClose">Done</button></div>
+    <label class="row">Volume <input type="range" id="vol" min="0" max="100" value="70"></label>
+    <label class="row">Camera sounds <input type="range" id="sfxVol" min="0" max="100" value="85"></label>
+    <label class="row check"><input type="checkbox" id="mute"> Mute</label>
+    <label class="row">Film grain <input type="range" id="grain" min="0" max="100" value="55"></label>
+    <label class="row check"><input type="checkbox" id="reduce"> Softer flash</label>
+    <label class="row check"><input type="checkbox" id="skel"> Show hand tracking</label>
+    <p class="keys">Keyboard: ← → change lens, space takes a photo.</p>
+    <p class="debug" id="debug"></p>
+  </aside>
+
+  <section class="start" id="startScreen">
+    <a class="back" href="../../">Track Lab</a>
+    <div class="start-body">
+      <h1>Frame it</h1>
+      <p class="tagline">An instant camera made of your fingers.</p>
+      <ul class="moves">
+        <li><svg viewBox="0 0 120 80" aria-hidden="true"><path d="M14 46V14h30M106 34v32H76" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><circle cx="60" cy="40" r="7" fill="#d2402a"/></svg><span>Hold up both hands like a director's frame. Inside it, the world changes.</span></li>
+        <li><svg viewBox="0 0 120 80" aria-hidden="true"><path d="M60 70V22" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><path d="M40 20a24 24 0 0 1 40 0" fill="none" stroke="#d2402a" stroke-width="5" stroke-linecap="round" stroke-dasharray="2 10"/></svg><span>Flick a middle finger to switch between five lenses.</span></li>
+        <li><svg viewBox="0 0 120 80" aria-hidden="true"><circle cx="42" cy="40" r="10" fill="currentColor"/><circle cx="78" cy="40" r="10" fill="currentColor"/><path d="M56 40h8" stroke="#d2402a" stroke-width="6" stroke-linecap="round"/></svg><span>Pinch both hands to take the photo. Print the ones you like.</span></li>
+      </ul>
+      <div class="shutter-wrap">
+        <button type="button" class="shutter" id="start" aria-describedby="privacy">Load film</button>
+        <p class="err" id="err" role="alert"></p>
+        <p class="privacy" id="privacy">Uses your camera. Nothing leaves this device.</p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>
