@@ -29,4 +29,13 @@ export const experiences = [
     cover: { glyph: '◰', colors: ['#e8a33a', '#d2402a', '#2b2622'], logo: 'brand/frame-it/mark.svg' },
     added: '2026-10-22',
   },
+  {
+    slug: 'sigil',
+    title: 'Sigil',
+    blurb: 'Draw magic in the air. Pinch to ink a circle, draw a sign inside it, then open your palm to cast water, fire, wind or light, or trace sigils as an apprentice.',
+    tracker: 'hands',
+    tags: ['drawing', 'gestures', 'spells', 'lessons'],
+    cover: { glyph: '✶', colors: ['#1d2340', '#c8963e', '#2b6cb0'], logo: 'brand/sigil/mark.svg' },
+    added: '2026-10-23',
+  },
 ];

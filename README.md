@@ -9,6 +9,7 @@ Video never leaves your device: tracking runs locally with [MediaPipe](https://a
 |---|---|---|---|
 | 01 | [Cursed Hands](experiences/cursed-hands/) | hands + face | Jujutsu Kaisen hand seals with Japanese voice lines, an exorcism wave mode, and Gojo face filters (eyes, hair) |
 | 02 | [Frame It](experiences/frame-it/) | hands | An instant camera made of your fingers: hold your hands like a camera to see the world through five lenses, press a finger like a shutter to print a polaroid |
+| 03 | [Sigil](experiences/sigil/) | hands | Draw magic in the air: pinch to ink a circle, draw a sign inside it (wave, triangle, spiral, star), then open your palm and push to cast water, fire, wind or light. Two signs combine; Apprentice mode grades your tracing |
 
 ## Structure
 
@@ -28,12 +29,18 @@ track-lab/
 │   │   ├── voice.js       Japanese call-outs (recorded clips or speech synthesis)
 │   │   ├── face-fx.js     optional face filters: glowing recoloured eyes, dyed hair
 │   │   └── bgm.mp3
-│   └── frame-it/
-│       ├── main.js        gestures (camera grip, tilt dial, shutter press), frame tracking, render
-│       ├── lenses.js      Inverted, X-Ray, Thermal, Manga Ink, Prism
-│       ├── photo.js       straighten the frame into a photo, polaroid card
-│       ├── roll.js        photo roll, viewer, polaroid printer
-│       └── music/         CC0 lo-fi by TAD (sources in music/README.md)
+│   ├── frame-it/
+│   │   ├── main.js        gestures (camera grip, tilt dial, shutter press), frame tracking, render
+│   │   ├── lenses.js      Inverted, X-Ray, Thermal, Manga Ink, Prism
+│   │   ├── photo.js       straighten the frame into a photo, polaroid card
+│   │   ├── roll.js        photo roll, viewer, polaroid printer
+│   │   └── music/         CC0 lo-fi by TAD (sources in music/README.md)
+│   └── sigil/
+│       ├── main.js        pen (pinch) and palm (charge, push, wipe) gestures, sigil, panel, render
+│       ├── glyphs.js      ring test and sign recognition ($1-style templates + shape checks)
+│       ├── ink.js         nib strokes and the parchment texture
+│       ├── spells.js      the four elements, their combinations, the ink splash of a failed ring
+│       └── lessons.js     Apprentice mode: lessons, tracing accuracy, grades
 ├── shared/
 │   ├── js/hands.js            camera start + hand tracking (Tasks Vision), skeleton / mirrored video drawing
 │   ├── js/vision.js           on-demand face landmarks (irises, lids) + hair/skin/clothes segmentation

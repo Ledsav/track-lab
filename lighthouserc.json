@@ -7,6 +7,7 @@
         "http://localhost:8080/track-lab/",
         "http://localhost:8080/track-lab/experiences/cursed-hands/",
         "http://localhost:8080/track-lab/experiences/frame-it/",
+        "http://localhost:8080/track-lab/experiences/sigil/",
         "http://localhost:8080/track-lab/privacy.html"
       ],
       "numberOfRuns": 1,
