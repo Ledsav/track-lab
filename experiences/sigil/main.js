@@ -3,7 +3,8 @@
    -----------------------------------------------------------------------------
    Draw magic in the air. Pinch thumb and index to put an ink nib on the page; draw a
    circle and it snaps into a ring; draw a sign inside (wave = water, triangle = fire,
-   spiral = wind, star = light); open your palm and push to cast. Two signs combine.
+   spiral = wind, star = light); open your palm and push to cast. Two signs combine, and a big
+   ring with signs that fill it casts a stronger spell.
    Apprentice mode: trace sigils over a gold guide and get graded.
 
    1. Config       every tunable number in one place
@@ -20,7 +21,7 @@ import { $, toggleFullscreen, canFullscreen, matches } from '../../shared/js/dom
 import { startHands, drawSkeleton, drawMirroredVideo, toMirrored } from '../../shared/js/hands.js';
 import { SIGN_IDS, signPath, fitRing, recognize, resample, pathLength, placeSign } from './glyphs.js';
 import { Stroke, drawInk, makePaper } from './ink.js';
-import { ELEMENTS, Spell, Splash, spellKey, BOLT_TIMES } from './spells.js';
+import { ELEMENTS, Spell, Splash, spellKey, powerTier, BOLT_TIMES, IGNITE } from './spells.js';
 import { LESSONS, Apprentice } from './lessons.js';
 
 /* ============================== 1. CONFIG ============================== */
@@ -55,7 +56,12 @@ const CONFIG = {
   },
   sign: { inside:.7, minSize:.22, max:2 },   // share of points inside the ring; smallest sign (× r); signs per ring
   doodle: { life:10 },         // seconds a stray stroke stays on the page
-  spell: { dur:3.8, title:2.6 },
+  spell: { title:2.6, glow:6 },   // seconds the name stays up; glow layer at 1/glow resolution (blur radius)
+  power: {                     // how strong a cast is: base + ring size + how full the signs are + how clean
+    base:.45, ring:1.15, fill:.45, clean:.15,
+    ringFrom:.1, ringTo:.4,    // ring radius × u: no size bonus at the first, full bonus at the second
+    pipsFrom:.45, pipsTo:2.1,  // power shown as 1–5 pips under the ring across this range
+  },
   colors: { ink:'#1d2340', gold:'#c8963e', paper:'#efe3c8' },
 };
 
@@ -121,15 +127,16 @@ function createSound(getLevels) {
     wipe:   () => { noise(.4, { f0:1500, f1:500, q:1, gain:.22 }); noise(.25, { type:'highpass', f0:5000, f1:3000, gain:.06, delay:.05 }); },
     page:   () => { noise(.3, { type:'highpass', f0:3500, f1:1800, gain:.1 }); noise(.18, { f0:700, f1:500, q:2, gain:.08, delay:.12 }); },
     star:   n => bell(880*Math.pow(1.26, n), { gain:.12 }),
-    cast:   key => {
-      tone('sine', 150, 55, .6, { gain:.32 }); noise(.7, { type:'lowpass', f0:300, f1:3200, gain:.18 });
-      const has = id => key.includes(id);
-      if (has('water')) { noise(1.8, { type:'lowpass', f0:500, f1:1800, gain:.16, attack:.2 }); for (let i = 0; i < 9; i++) tone('sine', 380 + Math.random()*300, 1100 + Math.random()*600, .06, { gain:.05, delay:.2 + Math.random()*1.6 }); }
-      if (has('fire')) { noise(2.2, { type:'lowpass', f0:420, f1:520, gain:.22, attack:.15 }); for (let i = 0; i < 28; i++) noise(.018, { type:'highpass', f0:2800 + Math.random()*2000, f1:2200, gain:.05 + Math.random()*.08, delay:Math.random()*2.6 }); }
-      if (has('wind')) { noise(1.2, { f0:350, f1:1500, q:2.5, gain:.2, attack:.25 }); noise(1.4, { f0:1500, f1:450, q:2.5, gain:.16, delay:1.1 }); }
-      if (has('light')) { [1046.5, 1318.5, 1568].forEach((f, i) => bell(f, { gain:.09, delay:i*.07, decay:1.8 })); for (let i = 0; i < 10; i++) tone('sine', 2000 + Math.random()*2400, 2600 + Math.random()*1400, .12, { gain:.025, delay:.2 + Math.random()*2 }); }
-      if (key === 'water+wind') for (const bt of BOLT_TIMES) { noise(.06, { type:'highpass', f0:4000, f1:2000, gain:.25, delay:bt }); noise(2, { type:'lowpass', f0:160, f1:60, gain:.4, attack:.05, delay:bt + .05 }); }
-      if (key === 'fire+water') noise(2.2, { type:'highpass', f0:5000, f1:3500, gain:.12, attack:.3 });   // the hiss of steam
+    cast:   ({ key, P }) => {
+      const D = IGNITE, gn = .6 + .3*P, has = id => key.includes(id);
+      tone('sine', 300, 1100, D, { gain:.06*gn, attack:D*.8 }); noise(D, { type:'highpass', f0:2000, f1:7000, gain:.06*gn, attack:D*.8 });   // the ink lighting up
+      tone('sine', 160/(.7 + .3*P), 45, .7, { gain:.35*gn, delay:D }); noise(.8, { type:'lowpass', f0:300, f1:3200, gain:.2*gn, delay:D });  // the burst: deeper and louder when stronger
+      if (has('water')) { noise(1.8, { type:'lowpass', f0:500, f1:1800, gain:.16*gn, attack:.2, delay:D }); for (let i = 0; i < 9; i++) tone('sine', 380 + Math.random()*300, 1100 + Math.random()*600, .06, { gain:.05, delay:D + .2 + Math.random()*1.6 }); }
+      if (has('fire')) { noise(2.2, { type:'lowpass', f0:420, f1:520, gain:.22*gn, attack:.15, delay:D }); for (let i = 0; i < 28; i++) noise(.018, { type:'highpass', f0:2800 + Math.random()*2000, f1:2200, gain:.05 + Math.random()*.08, delay:D + Math.random()*2.6 }); }
+      if (has('wind')) { noise(1.2, { f0:350, f1:1500, q:2.5, gain:.2*gn, attack:.25, delay:D }); noise(1.4, { f0:1500, f1:450, q:2.5, gain:.16*gn, delay:D + 1.1 }); }
+      if (has('light')) { [1046.5, 1318.5, 1568].forEach((f, i) => bell(f, { gain:.09*gn, delay:D + i*.07, decay:1.8 })); for (let i = 0; i < 10; i++) tone('sine', 2000 + Math.random()*2400, 2600 + Math.random()*1400, .12, { gain:.025, delay:D + .2 + Math.random()*2 }); }
+      if (key === 'water+wind') for (const bt of BOLT_TIMES.slice(0, P > 1.5 ? 4 : 3)) { noise(.06, { type:'highpass', f0:4000, f1:2000, gain:.25, delay:D + bt }); noise(2, { type:'lowpass', f0:160, f1:60, gain:.4, attack:.05, delay:D + bt + .05 }); }
+      if (key === 'fire+water') noise(2.2, { type:'highpass', f0:5000, f1:3500, gain:.12*gn, attack:.3, delay:D });   // the hiss of steam
     },
   };
   return { init, update, shot:(name, arg) => { if (ac && shots[name]) shots[name](arg); } };
@@ -384,7 +391,10 @@ class App {
       $('start').disabled = false; $('start').textContent = 'Uncap the ink';
     }
   }
-  resizePage() { const k = 1280/Math.max(innerWidth, innerHeight); this.pageSize = [Math.round(innerWidth*k), Math.round(innerHeight*k)]; }
+  resizePage() {
+    const w = innerWidth || 1280, h = innerHeight || 720, k = 1280/Math.max(w, h);   // a hidden window can report 0×0
+    this.pageSize = [Math.round(w*k), Math.round(h*k)];
+  }
 
   frame = now => {
     requestAnimationFrame(this.frame);
@@ -468,7 +478,7 @@ class App {
       this.apprentice.scoreRing(pts, g); at = g;
     }
     if (this.sigil) this.retire(this.sigil);
-    this.sigil = new Sigil(fit, pts, this.t, at); this.ringsMade++;
+    this.sigil = new Sigil(fit, pts, this.t, at); this.sigil.power = this.power(this.sigil); this.ringsMade++;
     this.sound.shot('chime');
   }
 
@@ -484,8 +494,18 @@ class App {
       this.apprentice.scoreSign(slot, pts);
       if (this.apprentice.complete) this.panel.toast('Now open your palm and push to cast.', 3500);
     }
-    sig.signs.push({ id:rec.id, pts, t:this.t });
+    sig.signs.push({ id:rec.id, pts, t:this.t, score:rec.score }); sig.power = this.power(sig);
     this.sound.shot('sign', rec.id);
+  }
+
+  /** How strong a sigil casts (≈ 0.45–2.2): a bigger ring, signs that fill it and clean strokes all hit harder. */
+  power(s) {
+    const K = CONFIG.power, ring = clamp((s.r/this.u - K.ringFrom)/(K.ringTo - K.ringFrom), 0, 1);
+    if (!s.signs.length) return K.base + K.ring*ring;
+    const room = s.r*(s.signs.length > 1 ? 1 : 1.4), avg = f => s.signs.reduce((a, g) => a + f(g), 0)/s.signs.length;
+    const fill = avg(g => { const xs = g.pts.map(p => p.x), ys = g.pts.map(p => p.y); return clamp(Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys))/room, 0, 1); });
+    const clean = avg(g => clamp((g.score - .7)/.25, 0, 1));
+    return K.base + K.ring*ring + K.fill*fill + K.clean*clean;
   }
 
   smudge(pts) { this.smudges.push({ pts, t0:this.t }); this.sound.shot('smudge'); }
@@ -505,10 +525,10 @@ class App {
     if (this.mode === 'apprentice' && !this.apprentice.complete) { this.panel.toast('Finish tracing the sigil first.'); return; }
     s.state = 'cast'; s.castT = this.t;
     const ids = s.signs.map(g => g.id), u = this.u;
-    const spell = new Spell(ids, s.c, s.r, { reduce:this.ctl.reduce, dur:CONFIG.spell.dur, lines:[s.ringPoints(u), ...s.signs.map(g => g.pts)] });
-    this.spells.push(spell); this.sound.shot('cast', spellKey(ids));
-    const above = s.c.y - s.r*1.4 > u*.14;
-    this.title = { text:spell.name, t0:this.t, x:s.c.x, y:above ? s.c.y - s.r*1.4 : s.c.y + s.r*1.55 };
+    const spell = new Spell(ids, s.c, s.r, { reduce:this.ctl.reduce, power:s.power, lines:[s.ringPoints(u), ...s.signs.map(g => g.pts)] });
+    s.spell = spell; this.spells.push(spell); this.sound.shot('cast', { key:spellKey(ids), P:spell.P });
+    const above = s.c.y - s.r*1.4 > u*.14, tier = powerTier(spell.P);
+    this.title = { text:(tier ? tier + ' ' : '') + spell.name, t0:this.t + IGNITE, P:spell.P, x:s.c.x, y:above ? s.c.y - s.r*1.4 : s.c.y + s.r*1.55 };
     if (this.mode === 'apprentice') { this.apprentice.finish(this.t - this.apprentice.t0); this.lessonCast = true; }
   }
 
@@ -550,7 +570,7 @@ class App {
     this.smudges = this.smudges.filter(s => t - s.t0 < .6);
     this.doodles = this.doodles.filter(d => t - d.born < CONFIG.doodle.life + 1.5);
     const s = this.sigil;
-    if (s && s.state === 'cast' && t - s.castT > CONFIG.spell.dur*.7) { s.alpha -= dt/.8; if (s.alpha <= 0) this.sigil = null; }
+    if (s && s.state === 'cast' && s.spell && s.spell.t > s.spell.dur - 1.2) { s.alpha -= dt; if (s.alpha <= 0) this.sigil = null; }   // it comes apart as the spell ends
     for (const f of this.fading) f.alpha -= dt/.5;
     this.fading = this.fading.filter(f => f.alpha > 0);
     this.flash = Math.max(...this.spells.map(sp => sp.flash), 0);
@@ -590,14 +610,45 @@ class App {
     if (this.sigil) this.drawSigil(ctx, this.sigil, u, t);
     if (this.active) drawInk(ctx, this.active.pts, { color:ink, wet:.6 });
     for (const s of this.splashes) s.render(ctx, ink);
-    // 3. above the ink: the spells themselves, the charge, the nibs
+    // 3. the spells bend the page drawn so far (shockwave, heat haze, twisting wind, ripples)
+    if (this.spells.some(sp => sp.distorting)) {
+      const b = this.layer('buf', W, H, 1); b.ctx.drawImage(this.canvas, 0, 0);
+      for (const sp of this.spells) if (sp.distorting) sp.distort(ctx, b.canvas);
+    }
+    // 4. above the ink: the spells, then their glow (drawn small, scaled up soft, screened on)
     for (const sp of this.spells) sp.renderOver(ctx);
+    if (this.spells.length) {
+      const k = CONFIG.spell.glow, g = this.layer('glow', W, H, 1/k);
+      g.ctx.setTransform(1, 0, 0, 1, 0, 0); g.ctx.fillStyle = '#000'; g.ctx.fillRect(0, 0, g.canvas.width, g.canvas.height);
+      g.ctx.setTransform(1/k, 0, 0, 1/k, 0, 0);
+      for (const sp of this.spells) sp.renderGlow(g.ctx);
+      ctx.save(); ctx.globalCompositeOperation = 'screen'; ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; ctx.drawImage(g.canvas, 0, 0, W, H); ctx.restore();
+    }
+    // 5. the charge, the nibs, the spell's name
     this.drawCharge(ctx, u, t);
     this.drawNibs(ctx, u);
     if (this.title) this.drawTitle(ctx, u, t);
-    // 4. lightning flash, tracking skeleton
+    // 6. lightning flash, tracking skeleton, camera shake
     if (this.flash > 0) { ctx.fillStyle = `rgba(240,246,255,${this.flash})`; ctx.fillRect(0, 0, W, H); }
     if (this.ctl.skeleton) drawSkeleton(ctx, this.hands, CONFIG.colors.ink, .5);
+    this.shake(W, H);
+  }
+
+  /** An offscreen canvas kept between frames, at scale × the page size. */
+  layer(name, W, H, scale) {
+    const L = this.layers || (this.layers = {}), w = Math.max(1, Math.round(W*scale)), h = Math.max(1, Math.round(H*scale));
+    if (!L[name]) { const canvas = document.createElement('canvas'); L[name] = { canvas, ctx:canvas.getContext('2d') }; }
+    if (L[name].canvas.width !== w || L[name].canvas.height !== h) { L[name].canvas.width = w; L[name].canvas.height = h; }
+    return L[name];
+  }
+
+  /** Shake the page (the canvas element, slightly enlarged so its edges never show). Off with Fewer flashes. */
+  shake(W) {
+    const amt = this.ctl.reduce ? 0 : Math.max(0, ...this.spells.map(sp => sp.shake));
+    if (amt > .3) {
+      const r = this.canvas.getBoundingClientRect(), k = r.width/W, a = Math.random()*TAU;
+      this.canvas.style.transform = `translate(${(Math.cos(a)*amt*k).toFixed(1)}px, ${(Math.sin(a)*amt*k).toFixed(1)}px) scale(1.03)`; this.shaking = true;
+    } else if (this.shaking) { this.canvas.style.transform = ''; this.shaking = false; }
   }
 
   page(ctx, W, H, u) {
@@ -665,6 +716,12 @@ class App {
       ctx.font = `italic 600 ${fs}px "Cormorant Garamond", Georgia, serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
       ctx.fillStyle = ink; ctx.globalAlpha *= .8;
       ctx.fillText(s.signs.map(g => ELEMENTS[g.id].name).join('  ·  '), s.c.x, s.c.y + s.r*1.16);
+      const K = CONFIG.power, n = 1 + Math.round(clamp((s.power - K.pipsFrom)/(K.pipsTo - K.pipsFrom), 0, 1)*4), z = fs*.2, y = s.c.y + s.r*1.16 + fs*1.45;
+      ctx.fillStyle = CONFIG.colors.gold; ctx.strokeStyle = CONFIG.colors.gold; ctx.lineWidth = Math.max(1, u*.0018);
+      for (let k = 0; k < 5; k++) {                                     // power: five diamonds, filled up to how strong it would cast
+        const x = s.c.x + (k - 2)*z*3.2; ctx.beginPath(); ctx.moveTo(x, y - z); ctx.lineTo(x + z*.7, y); ctx.lineTo(x, y + z); ctx.lineTo(x - z*.7, y); ctx.closePath();
+        k < n ? ctx.fill() : ctx.stroke();
+      }
     }
     ctx.restore();
   }
@@ -718,7 +775,7 @@ class App {
 
   drawTitle(ctx, u, t) {
     const T = this.title, k = t - T.t0, a = ease(k/.3)*clamp((CONFIG.spell.title - k)/.6, 0, 1); if (a <= 0) return;
-    const fs = Math.max(26, u*.085);
+    const fs = Math.max(26, u*.085*(.8 + .2*T.P));
     ctx.save(); ctx.globalAlpha = a; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.font = `italic 600 ${fs}px "Cormorant Garamond", Georgia, serif`;
     ctx.fillStyle = 'rgba(239,227,200,.85)'; ctx.fillText(T.text, T.x + 1.5, T.y + 1.5);       // a paper-coloured halo keeps it readable over effects
