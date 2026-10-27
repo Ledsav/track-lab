@@ -1,0 +1,27 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "setup:check-node",
+      "detail": "No npm dependencies; just checks Node 18+ is installed.",
+      "type": "shell",
+      "command": "node -e \"const m=+process.versions.node.split('.')[0];if(m<18){console.error('track-lab needs Node 18+, found '+process.version);process.exit(1)}console.log('node '+process.version+' ok')\"",
+      "problemMatcher": []
+    },
+    {
+      "label": "Setup (fresh clone)",
+      "detail": "Nothing to install. Run Dev next.",
+      "dependsOrder": "sequence",
+      "dependsOn": ["setup:check-node"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Dev",
+      "detail": "npm run dev: http://localhost:5173/",
+      "type": "shell",
+      "command": "npm run dev",
+      "isBackground": true,
+      "problemMatcher": []
+    }
+  ]
+}

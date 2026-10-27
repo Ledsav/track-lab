@@ -59,11 +59,16 @@ No build step. Everything is plain ES modules served as static files, so GitHub 
 
 ## Develop
 
+Needs Node 18+ (CI uses 20). No npm dependencies, so there is nothing to install.
+
 ```bash
+git clone https://github.com/Ledsav/track-lab.git
+cd track-lab
 npm run dev
 ```
 
-Opens on http://localhost:5173/. The camera needs a secure context, and `localhost` counts as one.
+Opens on http://localhost:5173/ (also answers under `/track-lab/`, like Pages). The camera needs a secure context, and `localhost` counts as one.
+In VS Code, *Setup (fresh clone)* checks Node and *Dev* starts the server.
 
 ## Add an experience
 
@@ -78,6 +83,8 @@ Each experience is a standalone page. Use whatever you want from `shared/`, or n
 
 ## Deploy
 
-Push to `main` and `.github/workflows/pages.yml` deploys it. On the way it runs `scripts/stamp.mjs`,
+Push to `main` and `.github/workflows/pages.yml` deploys it. In the repo's *Settings → Pages*, *Source* must be
+**GitHub Actions** (not "Deploy from a branch"). It is served at `/track-lab/` on the custom domain set by the
+[ledsav.github.io](https://github.com/Ledsav/ledsav.github.io) user site. On the way it runs `scripts/stamp.mjs`,
 which adds `?v=<commit>` to every local module / script / style URL, so a browser can never mix
 cached files from two deploys (Pages caches each file for 10 minutes). Source files stay unstamped.

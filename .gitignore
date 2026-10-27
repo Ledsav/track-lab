@@ -2,7 +2,8 @@ node_modules/
 .DS_Store
 Thumbs.db
 .idea/
-.vscode/
+.vscode/*
+!.vscode/tasks.json
 *.log
 .claude/*
 !.claude/skills/
